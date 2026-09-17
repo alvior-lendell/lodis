@@ -1,0 +1,41 @@
+{
+  "name": "LODISv2 - Lendell Online Digital Interactive System",
+  "short_name": "LODISv2",
+  "description": "Central web application launcher for operational platforms and administrative management systems.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#ffffff",
+  "theme_color": "#00687A",
+  "icons": [
+    {
+      "src": "/images/logo192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/logo512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/images/LODISv2_1280x720.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "LODISv2 Desktop Application Launcher"
+    },
+    {
+      "src": "/images/ss750x1334.png",
+      "sizes": "750x1334",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "LODISv2 Mobile Application Launcher"
+    }
+  ]
+}
