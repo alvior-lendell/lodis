@@ -1,11 +1,3 @@
-@php
-    $securitySettings = $securitySettings ?? \App\Models\SecuritySetting::instance();
-    $verifyRoute = $verifyRoute ?? (Route::has('verification.sms.verify') ? route('verification.sms.verify') : route('password.sms.verify'));
-    $resendRoute = $resendRoute ?? (Route::has('verification.sms.resend') ? route('verification.sms.resend') : route('password.sms.send'));
-    $title = $title ?? 'SMS Security Verification';
-    $buttonLabel = $buttonLabel ?? 'Verify Phone Number';
-@endphp
-
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="h-full bg-slate-50">
 <head>
@@ -23,7 +15,7 @@
     <link rel="preconnect" href="https://fonts.bunny.net">
     <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet" />
 
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @vite(['resources/css/app.css', 'resources/js/app.js', 'resources/js/auth.js'])
 </head>
 <body class="min-h-screen font-sans antialiased bg-slate-50 text-slate-900 relative selection:bg-brand selection:text-white">
 

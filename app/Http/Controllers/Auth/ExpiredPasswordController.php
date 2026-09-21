@@ -3,11 +3,12 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
-use App\Models\SecuritySetting;
 use App\Models\AuthenticationLog;
+use App\Models\SecuritySetting;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules;
 use Illuminate\Validation\ValidationException;
@@ -30,8 +31,15 @@ class ExpiredPasswordController extends Controller
      */
     public function update(Request $request): RedirectResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var \App\Models\User|null $user */
         $user = Auth::user();
+
+        if (! $user) {
+            return redirect()->route('login')->withErrors([
+                'login' => 'Your session has expired. Please log in again.',
+            ]);
+        }
+
         $securitySettings = SecuritySetting::instance();
 
         // Build password rules dynamically based on SecuritySettings
@@ -66,17 +74,24 @@ class ExpiredPasswordController extends Controller
             ]);
         }
 
-        // 3. Save existing active password hash to history before changing
-        $user->recordPasswordHistory();
+        // 3. Atomic database operations
+        DB::transaction(function () use ($user, $request) {
+            // Save existing active password hash to history before changing
+            $user->recordPasswordHistory();
 
-        // 4. Update user password and refresh password_changed_at timestamp
-        $user->forceFill([
-            'password' => Hash::make($request->password),
-            'password_changed_at' => now(),
-        ])->save();
+            // Update user password and refresh password_changed_at timestamp
+            $user->forceFill([
+                'password' => Hash::make($request->password),
+                'password_changed_at' => now(),
+            ])->save();
 
-        AuthenticationLog::log($request->user()->id, AuthenticationLog::EVENT_PASSWORD_EXPIRED, $request);
-        
+            AuthenticationLog::log($user->id, AuthenticationLog::EVENT_PASSWORD_EXPIRED, $request);
+        });
+
+        // 4. Re-authenticate session to sync new password hash
+        Auth::login($user);
+        $request->session()->regenerate();
+
         return redirect()->route('dashboard')
             ->with('status', 'Your password has been successfully updated.');
     }

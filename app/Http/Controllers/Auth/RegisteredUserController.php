@@ -215,16 +215,8 @@ class RegisteredUserController extends Controller
                 session(['pending_totp_secret' => $google2fa->generateSecretKey()]);
             }
             $secretKey = session('pending_totp_secret');
-
-            $otpauthUrl = $google2fa->getQRCodeUrl('LODISv2', $email, $secretKey);
-
-            $renderer = new ImageRenderer(
-                new RendererStyle(200),
-                new SvgImageBackEnd()
-            );
-            $writer = new Writer($renderer);
-            $qrCodeUrl = 'data:image/svg+xml;base64,'.base64_encode($writer->writeString($otpauthUrl));
-        } else {
+            $qrCodeUrl = $google2fa->getQRCodeUrl('LODISv2', $email, $secretKey);
+        } elseif ($method === 'email') {
             $otpRecord = OtpVerification::where('email', $email)
                 ->where('is_used', false)
                 ->where('expires_at', '>', now())
@@ -232,8 +224,8 @@ class RegisteredUserController extends Controller
                 ->first();
 
             if ($otpRecord) {
-                $secondsPassed = max(0, now()->timestamp - $otpRecord->updated_at->timestamp);
-                $cooldownSeconds = (int) ceil(max(0, 60 - $secondsPassed));
+                $secondsPassed = max(0, now()->timestamp - $otpRecord->created_at->timestamp);
+                $cooldownSeconds = (int) max(0, 60 - $secondsPassed);
             }
         }
 
@@ -241,6 +233,7 @@ class RegisteredUserController extends Controller
             'email' => $email,
             'phoneNumber' => $registration['phone_number'] ?? null,
             'method' => $method,
+            'cooldown' => $cooldownSeconds,
             'cooldownSeconds' => $cooldownSeconds,
             'qrCodeUrl' => $qrCodeUrl,
             'secretKey' => $secretKey,
@@ -383,7 +376,7 @@ class RegisteredUserController extends Controller
     }
 
     /**
-     * Resend verification OTP code (Email only).
+     * Resend verification OTP code (Email only) with anti-spam protection.
      */
     public function resendOtp(): RedirectResponse
     {
@@ -404,18 +397,30 @@ class RegisteredUserController extends Controller
             ->latest()
             ->first();
 
-        if ($otpRecord && $otpRecord->resend_attempts >= 3) {
-            $otpRecord->update(['is_used' => true]);
-            session()->forget(['pending_otp_email', 'pending_registration']);
+        if ($otpRecord) {
+            // 1. Enforce 60-second anti-spam cooldown on backend
+            $secondsPassed = now()->timestamp - $otpRecord->created_at->timestamp;
+            if ($secondsPassed < 60) {
+                $remaining = 60 - $secondsPassed;
+                return back()->withErrors([
+                    'otp' => "Please wait {$remaining} seconds before requesting a new verification code.",
+                ]);
+            }
 
-            return redirect()->route('register')->withErrors([
-                'email' => 'Maximum OTP resend limit reached. Please restart registration.',
-            ]);
+            // 2. Enforce maximum resend limit (3 attempts max)
+            if ($otpRecord->resend_attempts >= 3) {
+                $otpRecord->update(['is_used' => true]);
+                session()->forget(['pending_otp_email', 'pending_registration', 'active_otp_method']);
+
+                return redirect()->route('register')->withErrors([
+                    'email' => 'Maximum OTP resend limit reached. Please restart registration.',
+                ]);
+            }
         }
 
         $this->dispatchOtpChallenge($email, $registration['name'], $registration['employee_id'], true);
 
-        return back()->with('status', 'A new 6-digit code has been sent via EMAIL.');
+        return back()->with('status', 'A new 6-digit verification code has been sent to your email.');
     }
 
     /**

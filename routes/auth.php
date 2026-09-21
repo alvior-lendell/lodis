@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\ConfirmablePasswordController;
 use App\Http\Controllers\Auth\DeviceVerificationController;
 use App\Http\Controllers\Auth\EmailVerificationNotificationController;
 use App\Http\Controllers\Auth\EmailVerificationPromptController;
+use App\Http\Controllers\Auth\ExpiredPasswordController;
 use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
@@ -21,13 +22,15 @@ Route::middleware('guest')->group(function () {
         ->name('register');
 
     Route::post('register/check-email', [RegisteredUserController::class, 'checkEmail'])
+        ->middleware('throttle:10,1')
         ->name('register.check-email');
 
     Route::get('register/check-email', function () {
         return redirect()->route('register');
     });
 
-    Route::post('register', [RegisteredUserController::class, 'store']);
+    Route::post('register', [RegisteredUserController::class, 'store'])
+        ->middleware('throttle:6,1');
 
     Route::get('register/select-otp-method', [RegisteredUserController::class, 'showSelectMethodForm'])
         ->name('register.otp.select');
@@ -36,9 +39,11 @@ Route::middleware('guest')->group(function () {
         ->name('register.otp');
 
     Route::post('register/verify-otp', [RegisteredUserController::class, 'verifyOtp'])
+        ->middleware('throttle:6,1')
         ->name('register.otp.verify');
 
     Route::post('register/resend-otp', [RegisteredUserController::class, 'resendOtp'])
+        ->middleware('throttle:3,1')
         ->name('register.otp.resend');
 
     Route::post('register/verify-otp/switch-method', [RegisteredUserController::class, 'switchMethod'])
@@ -48,22 +53,26 @@ Route::middleware('guest')->group(function () {
     Route::get('/', [AuthenticatedSessionController::class, 'create'])
         ->name('login');
 
-    Route::post('/', [AuthenticatedSessionController::class, 'store']);
+    Route::post('/', [AuthenticatedSessionController::class, 'store'])
+        ->middleware('throttle:5,1');
 
     Route::get('login', function () {
         return redirect('/');
     });
 
-    Route::post('login', [AuthenticatedSessionController::class, 'store']);
+    Route::post('login', [AuthenticatedSessionController::class, 'store'])
+        ->middleware('throttle:5,1');
 
     // SMS Phone Number Verification Routes
     Route::get('verify-sms', [SmsVerificationController::class, 'create'])
         ->name('verification.sms');
 
     Route::post('verify-sms', [SmsVerificationController::class, 'store'])
+        ->middleware('throttle:6,1')
         ->name('verification.sms.verify');
 
     Route::post('verify-sms/resend', [SmsVerificationController::class, 'resend'])
+        ->middleware('throttle:3,1')
         ->name('verification.sms.resend');
 
     // TOTP / Authenticator App Verification Routes
@@ -71,62 +80,73 @@ Route::middleware('guest')->group(function () {
         ->name('2fa.authenticator');
 
     Route::post('verify-authenticator', [TwoFactorAuthenticationController::class, 'store'])
+        ->middleware('throttle:6,1')
         ->name('2fa.authenticator.verify');
 
-    // Workstation & Device Verification Wait/Finalize
+    // Workstation & Device Verification Wait/Finalize/Fallback
     Route::get('/auth/device-wait/{id}', [DeviceVerificationController::class, 'showWait'])
         ->name('device.wait');
 
     Route::post('/auth/device-verify-start/{id}', [DeviceVerificationController::class, 'startVerification'])
+        ->middleware('throttle:6,1')
         ->name('device.start-verification');
 
     Route::post('/auth/device-finalize/{id}', [DeviceVerificationController::class, 'finalize'])
+        ->middleware('throttle:6,1')
         ->name('device.finalize');
 
-    // Dynamic Multi-Method Device Verification Routes (Email, SMS, Authenticator)
+    Route::post('/auth/device-fallback-otp/{id}', [DeviceVerificationController::class, 'fallbackOtp'])
+        ->middleware('throttle:5,1')
+        ->name('device.fallback-otp');
+
+    // Dedicated Device Authorization OTP Routes
     Route::get('/auth/device-otp', [DeviceVerificationController::class, 'showOtp'])
         ->name('device.otp');
 
     Route::post('/auth/device-otp', [DeviceVerificationController::class, 'verifyOtp'])
+        ->middleware('throttle:6,1')
         ->name('device.otp.verify');
 
     Route::post('/auth/device-otp/switch', [DeviceVerificationController::class, 'switchMethod'])
         ->name('device.otp.switch');
 
     Route::post('/auth/device-otp/resend', [DeviceVerificationController::class, 'resendOtp'])
+        ->middleware('throttle:3,1')
         ->name('device.otp.resend');
+
     // Password Reset Routes
     Route::get('forgot-password', [PasswordResetLinkController::class, 'create'])
         ->name('password.request');
 
     Route::post('forgot-password', [PasswordResetLinkController::class, 'store'])
+        ->middleware('throttle:5,1')
         ->name('password.email');
 
-    // Dedicated SMS Password Reset Verification Routes
-    Route::get('forgot-password/sms', [PasswordResetLinkController::class, 'showSmsForm'])
-        ->name('password.sms');
+    // Authenticator App Password Reset Routes
+    Route::get('forgot-password/authenticator', [PasswordResetLinkController::class, 'showAuthenticatorForm'])
+        ->name('password.authenticator');
 
-    Route::post('forgot-password/sms', [PasswordResetLinkController::class, 'sendSmsCode'])
-        ->name('password.sms.send');
+    Route::post('forgot-password/authenticator/verify', [PasswordResetLinkController::class, 'verifyAuthenticatorCode'])
+        ->middleware('throttle:6,1')
+        ->name('password.authenticator.verify');
 
-    Route::post('forgot-password/sms/verify', [PasswordResetLinkController::class, 'verifySmsCode'])
-        ->name('password.sms.verify');
-
+    // Display password reset form
     Route::get('reset-password/{token}', [NewPasswordController::class, 'create'])
         ->name('password.reset');
 
+    // Handle password update submission
     Route::post('reset-password', [NewPasswordController::class, 'store'])
         ->name('password.store');
 });
 
 Route::middleware('auth')->group(function () {
-    
+
     // Register "Mark All Read" Route
     Route::post('/notifications/mark-all-read', function () {
         auth()->user()->unreadNotifications->markAsRead();
         return back()->with('status', 'All notifications marked as read.');
     })->name('notifications.markAllRead');
-    
+
     // Email Verification Routes
     Route::get('verify-email', EmailVerificationPromptController::class)
         ->name('verification.notice');
@@ -143,10 +163,18 @@ Route::middleware('auth')->group(function () {
     Route::get('confirm-password', [ConfirmablePasswordController::class, 'show'])
         ->name('password.confirm');
 
-    Route::post('confirm-password', [ConfirmablePasswordController::class, 'store']);
+    Route::post('confirm-password', [ConfirmablePasswordController::class, 'store'])
+        ->middleware('throttle:6,1');
 
     Route::put('password', [PasswordController::class, 'update'])
         ->name('password.update');
+
+    // Expired Password Routes
+    Route::get('password/expired', [ExpiredPasswordController::class, 'show'])
+        ->name('password.expired');
+
+    Route::post('password/expired', [ExpiredPasswordController::class, 'update'])
+        ->name('password.expired.update');
 
     // Active Session Management (Revoke Specific & All Other Browser Sessions)
     Route::post('/profile/sessions/revoke-others', [ProfileController::class, 'revokeOtherSessions'])

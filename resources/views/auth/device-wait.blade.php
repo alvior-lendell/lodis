@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Waiting for Authorization — LODISv2</title>
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @vite(['resources/css/app.css', 'resources/js/app.js', 'resources/js/auth.js'])
 </head>
 <body class="bg-slate-50 font-sans antialiased text-slate-900 min-h-screen flex items-center justify-center p-6">
     <div class="max-w-md w-full p-8 bg-white rounded-3xl border border-slate-200 text-center space-y-6 shadow-xl relative overflow-hidden">

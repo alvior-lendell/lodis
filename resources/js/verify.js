@@ -1,6 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
     const verifyForm = document.getElementById('verify-otp-form');
     const resendForm = document.getElementById('resend-otp-form');
+    
+    // Guard clause: Exit if neither form exists on the current page
+    if (!verifyForm && !resendForm) return;
+
     const authContainer = document.getElementById('auth-container');
     const otpInput = document.getElementById('otp');
     const verifyBtn = document.getElementById('verify-btn');
@@ -11,7 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const resendLabel = document.getElementById('resend-label');
     const timerLabel = document.getElementById('timer-label');
 
-    let remainingSeconds = parseInt("{{ $cooldownSeconds ?? 60 }}", 10);
+    // Read initial cooldown from HTML data attribute instead of Blade interpolation
+    let remainingSeconds = parseInt(resendBtn?.dataset.cooldown || '60', 10);
 
     const startCountdown = () => {
         if (!resendBtn || !timerLabel) return;
@@ -42,16 +47,16 @@ document.addEventListener('DOMContentLoaded', () => {
     startCountdown();
 
     verifyForm?.addEventListener('submit', () => {
-        verifyBtn.disabled = true;
+        if (verifyBtn) verifyBtn.disabled = true;
         btnSpinner?.classList.remove('hidden');
-        btnLabel.textContent = 'Verifying...';
+        if (btnLabel) btnLabel.textContent = 'Verifying...';
         authContainer?.classList.add('pointer-events-none');
         if (otpInput) otpInput.readOnly = true;
         verifyForm.classList.add('opacity-85');
     });
 
     resendForm?.addEventListener('submit', () => {
-        resendBtn.disabled = true;
+        if (resendBtn) resendBtn.disabled = true;
         resendSpinner?.classList.remove('hidden');
         if (resendLabel) resendLabel.childNodes[0].nodeValue = 'Sending... ';
         authContainer?.classList.add('pointer-events-none');

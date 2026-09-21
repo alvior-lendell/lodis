@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>LODISv2 - Lendell Online Digital Interactive System</title>
 
     <!-- Favicon & PWA Directives -->
@@ -19,7 +20,12 @@
     <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet" />
 
     <!-- Compiled Assets via Vite -->
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @vite(['resources/css/app.css', 'resources/js/app.js', 'resources/js/auth.js'])
+
+    <!-- Cloudflare Turnstile API -->
+    @if (config('services.turnstile.key'))
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    @endif
 </head>
 <body class="min-h-screen font-sans antialiased bg-slate-50 text-slate-900 relative selection:bg-brand selection:text-white">
 
@@ -40,8 +46,8 @@
                     <h3 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Secure Sign In</h3>
                     <p class="text-xs sm:text-sm text-slate-500 mt-1">Enter your credentials to access the application launcher.</p>
                 </div>
-                
-                <!-- Device Rejection & Warning Alert -->
+
+                <!-- Device Rejection Alert -->
                 @if (session('error') || session('rejected') || request()->has('rejected'))
                     <div class="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-xs text-rose-800 flex items-start gap-3 shadow-sm">
                         <svg class="w-5 h-5 text-rose-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -66,7 +72,7 @@
                     </div>
                 @endif
 
-                <!-- Error Messages -->
+                <!-- Validation Errors -->
                 @if ($errors->any())
                     <div class="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-xs text-rose-700 shadow-sm">
                         <ul class="list-disc list-inside space-y-1 font-medium">
@@ -112,8 +118,8 @@
                                 data-caps-warning="caps-lock-warning"
                                 class="form-input block w-full pl-11 pr-11 py-3.5 rounded-2xl border-slate-200 focus:border-brand focus:ring-4 focus:ring-brand/15 text-sm outline-none transition font-medium placeholder:text-slate-400"
                                 placeholder="••••••••">
-                    
-                            <!-- Toggle Show Password Button -->
+
+                            <!-- Password Toggle Button -->
                             <button type="button" id="toggle-password-btn" data-toggle-password="password" title="Toggle password visibility"
                                 class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-brand focus:text-brand outline-none transition z-10">
                                 <svg id="eye-icon" class="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -125,8 +131,8 @@
                                 </svg>
                             </button>
                         </div>
-                    
-                        <!-- Caps Lock Warning Indicator -->
+
+                        <!-- Caps Lock Warning -->
                         <div id="caps-lock-warning" class="hidden text-[11px] font-bold text-amber-600 mt-1.5 flex items-center gap-1.5 animate-pulse">
                             <svg class="w-4 h-4 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
@@ -135,7 +141,7 @@
                         </div>
                     </div>
 
-                    <!-- Sleek Micro-Switch Toggle -->
+                    <!-- Remember Me Toggle Switch -->
                     <div class="flex items-center justify-between pt-1">
                         <label for="remember" class="flex items-center gap-3 cursor-pointer select-none group py-1">
                             <div class="relative">
@@ -146,7 +152,12 @@
                         </label>
                     </div>
 
-                    <button id="submit-btn" type="submit" 
+                    <!-- Cloudflare Turnstile Field -->
+                    @if (config('services.turnstile.key'))
+                        <div class="cf-turnstile my-4" data-sitekey="{{ config('services.turnstile.key') }}" data-theme="light"></div>
+                    @endif
+
+                    <button id="submit-btn" type="submit"
                         class="w-full py-3.5 px-4 rounded-2xl bg-brand hover:bg-brand-hover active:bg-brand-hover text-white text-sm font-bold shadow-lg shadow-brand/20 hover:shadow-xl hover:shadow-brand/30 transition duration-200 ease-in-out flex items-center justify-center gap-2 disabled:opacity-85 disabled:cursor-not-allowed">
                         <svg id="btn-spinner" class="hidden animate-spin h-4 w-4 text-white shrink-0" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -206,7 +217,7 @@
                                 <p class="text-[11px] text-slate-500">Launch directly from your desktop or home screen.</p>
                             </div>
                         </div>
-                        <button id="pwa-install-btn" type="button" 
+                        <button id="pwa-install-btn" type="button"
                             class="px-3.5 py-2 rounded-xl bg-brand hover:bg-brand-hover active:bg-brand-hover text-white text-xs font-bold shadow-sm transition shrink-0 flex items-center gap-1.5">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>

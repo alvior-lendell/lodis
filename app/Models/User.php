@@ -35,6 +35,8 @@ class User extends Authenticatable
         'is_active',
         'profile_photo_path',
         'email_verified_at',
+        'failed_login_attempts',
+        'locked_until',
     ];
 
     /**
@@ -57,8 +59,45 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password_changed_at' => 'datetime',
+            'locked_until' => 'datetime',
             'is_active' => 'boolean',
         ];
+    }
+
+    /**
+     * Check if the account is currently locked out.
+     */
+    public function isLockedOut(): bool
+    {
+        return $this->locked_until !== null && $this->locked_until->isFuture();
+    }
+
+    /**
+     * Increment failed login counter and apply lockout if threshold is reached.
+     */
+    public function recordFailedLoginAttempt(int $maxAttempts = 5, int $lockoutMinutes = 15): void
+    {
+        $this->increment('failed_login_attempts');
+
+        if ($this->failed_login_attempts >= $maxAttempts) {
+            $this->update([
+                'locked_until' => now()->addMinutes($lockoutMinutes),
+                'failed_login_attempts' => 0,
+            ]);
+        }
+    }
+
+    /**
+     * Clear failed attempts and remove active account lockouts.
+     */
+    public function resetLockout(): void
+    {
+        if ($this->failed_login_attempts > 0 || $this->locked_until !== null) {
+            $this->update([
+                'failed_login_attempts' => 0,
+                'locked_until' => null,
+            ]);
+        }
     }
 
     /**
@@ -172,12 +211,12 @@ class User extends Authenticatable
         return $this->hasMany(ProfileUpdateRequest::class, 'reviewed_by');
     }
     
-    public function userDevices(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function userDevices(): HasMany
     {
         return $this->hasMany(UserDevice::class);
     }
     
-    public function deviceAuthorizations(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function deviceAuthorizations(): HasMany
     {
         return $this->hasMany(DeviceAuthorization::class);
     }

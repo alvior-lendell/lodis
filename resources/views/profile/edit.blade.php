@@ -23,7 +23,7 @@
 
     <!-- Compiled Assets via Vite -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
-    
+
     <style>
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -60,6 +60,20 @@
                         <li>{{ $error }}</li>
                     @endforeach
                 </ul>
+            </div>
+        @endif
+        
+        @if ($pendingProfileRequest)
+            <div class="p-4 rounded-2xl bg-amber-50 border border-amber-200/80 text-xs text-amber-800 shadow-sm">
+                <div class="flex items-center gap-3">
+                    <svg class="w-5 h-5 text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <div>
+                        <span class="font-bold block">A profile change request is awaiting HR approval.</span>
+                        <span class="text-amber-700">Submitted {{ $pendingProfileRequest->created_at->diffForHumans() }}. You cannot submit another change until this one is reviewed.</span>
+                    </div>
+                </div>
             </div>
         @endif
 
@@ -315,11 +329,16 @@
 
                 <!-- Tab 2: Password Security -->
                 <div id="tab-security" class="tab-content hidden space-y-6">
+
+                    <!-- Password Rotation Card -->
                     <div class="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-6">
                         <div class="border-b border-slate-100 pb-4">
                             <h2 class="text-base font-extrabold text-slate-900 tracking-tight">Rotate Account Password</h2>
                             <p class="text-xs text-slate-500 mt-0.5">Maintain security by ensuring your password satisfies system requirements.</p>
                         </div>
+
+                        <!-- Inline AJAX Response Alerts -->
+                        <div id="pwd-alert-container"></div>
 
                         @if (Route::has('password.update'))
                             <form id="password-update-form" method="POST" action="{{ route('password.update') }}" autocomplete="off" class="space-y-5 max-w-xl">
@@ -408,6 +427,71 @@
                             </form>
                         @endif
                     </div>
+
+                    <!-- Password History Card -->
+                    <div class="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 shadow-sm space-y-6">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-4">
+                            <div>
+                                <h2 class="text-base font-extrabold text-slate-900 tracking-tight">Password Change History</h2>
+                                <p class="text-xs text-slate-500 mt-0.5">Historical records of past password modification and rotation events.</p>
+                            </div>
+                            <span class="px-3 py-1 rounded-full text-[10px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200 w-fit">
+                                Reuse Protection: Prevents Last {{ $securitySettings?->prevent_password_reuse_count ?? 5 }} Passwords
+                            </span>
+                        </div>
+
+                        @php
+                            $historyItems = $passwordHistories 
+                                ?? (method_exists(auth()->user(), 'passwordHistories') ? auth()->user()->passwordHistories()->latest()->take(10)->get() : null)
+                                ?? (isset($auditLogs) ? $auditLogs->filter(fn($l) => in_array($l->event, ['password_change', 'password_reset', 'password_expired'])) : collect());
+                        @endphp
+
+                        <div class="overflow-x-auto border border-slate-200/80 rounded-2xl">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-slate-50 border-b border-slate-200/80 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                        <th class="p-4">Action Event</th>
+                                        <th class="p-4">IP Address</th>
+                                        <th class="p-4">Timestamp</th>
+                                        <th class="p-4 text-right">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                                    @forelse ($historyItems as $history)
+                                        <tr class="hover:bg-slate-50/50 transition">
+                                            <td class="p-4 font-bold text-slate-900 flex items-center gap-2">
+                                                <svg class="w-4 h-4 text-brand shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                                                </svg>
+                                                <span>{{ \Illuminate\Support\Str::headline($history->event ?? $history->action ?? 'Password Modified') }}</span>
+                                            </td>
+                                            <td class="p-4 font-mono text-slate-500">{{ $history->ip_address ?? '127.0.0.1' }}</td>
+                                            <td class="p-4 text-slate-500">
+                                                @if (isset($history->created_at))
+                                                    {{ \Carbon\Carbon::parse($history->created_at)->format('M d, Y H:i:s') }}
+                                                    <span class="text-slate-400 text-[11px]">({{ \Carbon\Carbon::parse($history->created_at)->diffForHumans() }})</span>
+                                                @else
+                                                    —
+                                                @endif
+                                            </td>
+                                            <td class="p-4 text-right">
+                                                <span class="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
+                                                    Recorded
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    @empty
+                                        <tr>
+                                            <td colspan="4" class="p-8 text-center text-slate-500 text-xs">
+                                                No previous password change history recorded yet.
+                                            </td>
+                                        </tr>
+                                    @endforelse
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                 </div>
 
                 <!-- Tab 3: Active Sessions & Trusted Devices -->
@@ -521,7 +605,7 @@
                         </div>
                 
                         @php
-                            $trustedDevices = auth()->user()->userDevices()->orderBy('last_active_at', 'desc')->get() ?? collect();
+                            $trustedDevices = method_exists(auth()->user(), 'userDevices') ? auth()->user()->userDevices()->orderBy('last_active_at', 'desc')->get() : collect();
                             $currentDeviceKey = request()->cookie('lodis_device_key');
                         @endphp
                 
@@ -559,7 +643,7 @@
                                 </div>
                             @empty
                                 <div class="p-8 text-center bg-slate-50 space-y-2">
-                                    <svg class="w-8 h-8 text-slate-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                                    <svg class="w-8 h-8 text-slate-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
                                     <h4 class="text-xs font-bold text-slate-700">No Trusted Devices Logged</h4>
                                     <p class="text-[11px] text-slate-500">Sign in from your standard workstation to register it as a trusted device.</p>
                                 </div>
@@ -649,44 +733,44 @@
                                                             Account Signed In
                                                         </span>
                                                         @break
-                
+                                                
                                                     @case('logout')
                                                         <span class="text-slate-600 flex items-center gap-1.5">
                                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
                                                             Account Signed Out
                                                         </span>
                                                         @break
-                
+                                                
                                                     @case('new_device_login')
                                                         <span class="text-amber-700 flex items-center gap-1.5">
                                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
                                                             New Device Authorization
                                                         </span>
                                                         @break
-                
+                                                
                                                     @case('password_change')
                                                         <span class="text-blue-700 flex items-center gap-1.5">
                                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 0121 9z"/></svg>
                                                             Password Modified
                                                         </span>
                                                         @break
-                
+                                                
                                                     @case('password_reset')
                                                         <span class="text-purple-700 flex items-center gap-1.5">
                                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                                                             Password Reset Completed
                                                         </span>
                                                         @break
-                
+                                                
                                                     @case('password_expired')
                                                         <span class="text-rose-700 flex items-center gap-1.5">
                                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                                             Password Expiry Action Required
                                                         </span>
                                                         @break
-                
+                                                
                                                     @default
-                                                        <span class="text-slate-700">{{ title_case(str_replace('_', ' ', $log->event)) }}</span>
+                                                        <span class="text-slate-700">{{ \Illuminate\Support\Str::headline($log->event) }}</span>
                                                 @endswitch
                                             </td>
                                             <td class="p-4 font-mono text-slate-500">{{ $log->ip_address ?? '127.0.0.1' }}</td>
@@ -907,6 +991,105 @@
 
             passwordInput?.addEventListener('input', validateChecklist);
             confirmPasswordInput?.addEventListener('input', validateChecklist);
+
+            // Intercept Password Form Submit via AJAX Fetch (Prevents Full Page Reload)
+            const passwordForm = document.getElementById('password-update-form');
+            const pwdSpinner = document.getElementById('pwd-spinner');
+            const pwdLabel = document.getElementById('pwd-label');
+            const pwdAlertContainer = document.getElementById('pwd-alert-container');
+
+            passwordForm?.addEventListener('submit', async (e) => {
+                e.preventDefault();
+
+                if (!updatePwdBtn || updatePwdBtn.disabled) return;
+
+                // Set Loading UI state
+                updatePwdBtn.disabled = true;
+                pwdSpinner?.classList.remove('hidden');
+                if (pwdLabel) pwdLabel.textContent = 'Updating...';
+
+                // Clear previous alerts
+                if (pwdAlertContainer) pwdAlertContainer.innerHTML = '';
+
+                const formData = new FormData(passwordForm);
+
+                try {
+                    const response = await fetch(passwordForm.action, {
+                        method: 'POST',
+                        headers: {
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: formData
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        // Success Banner
+                        if (pwdAlertContainer) {
+                            pwdAlertContainer.innerHTML = `
+                                <div class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200/80 text-xs text-emerald-800 flex items-center justify-between shadow-sm">
+                                    <div class="flex items-center gap-3">
+                                        <svg class="w-5 h-5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                        </svg>
+                                        <span class="font-medium">Password updated successfully.</span>
+                                    </div>
+                                    <button type="button" onclick="this.parentElement.remove()" class="text-emerald-600 hover:text-emerald-800 text-sm font-bold p-1">&times;</button>
+                                </div>
+                            `;
+                        }
+
+                        // Reset input fields & re-evaluate checklist validation
+                        passwordForm.reset();
+                        validateChecklist();
+
+                    } else if (response.status === 422) {
+                        // Validation Error Banner (e.g. current password mismatch or password reuse)
+                        const errorList = data.errors 
+                            ? Object.values(data.errors).flat().map(err => `<li>${err}</li>`).join('')
+                            : `<li>${data.message || 'Password update failed validation.'}</li>`;
+
+                        if (pwdAlertContainer) {
+                            pwdAlertContainer.innerHTML = `
+                                <div class="p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-xs text-rose-700 shadow-sm">
+                                    <div class="flex items-center gap-2 mb-2 font-bold text-rose-800">
+                                        <svg class="w-4 h-4 text-rose-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                        </svg>
+                                        <span>Please resolve the following errors:</span>
+                                    </div>
+                                    <ul class="list-disc list-inside space-y-1 font-medium pl-1">
+                                        ${errorList}
+                                    </ul>
+                                </div>
+                            `;
+                        }
+                    } else {
+                        throw new Error(data.message || 'An unexpected error occurred while updating your password.');
+                    }
+                } catch (error) {
+                    if (pwdAlertContainer) {
+                        pwdAlertContainer.innerHTML = `
+                            <div class="p-4 rounded-2xl bg-rose-50 border border-rose-200/80 text-xs text-rose-700 shadow-sm">
+                                <div class="flex items-center gap-2 font-bold text-rose-800">
+                                    <svg class="w-4 h-4 text-rose-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                    </svg>
+                                    <span>${error.message || 'Failed to communicate with the server. Please try again.'}</span>
+                                </div>
+                            </div>
+                        `;
+                    }
+                } finally {
+                    // Restore Button State
+                    pwdSpinner?.classList.add('hidden');
+                    if (pwdLabel) pwdLabel.textContent = 'Update Password';
+                    validateChecklist();
+                }
+            });
         });
     </script>
 </body>

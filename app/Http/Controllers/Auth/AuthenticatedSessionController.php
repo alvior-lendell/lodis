@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -33,18 +34,64 @@ class AuthenticatedSessionController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        // 1. Locate user credentials
+        $throttleKey = Str::transliterate(Str::lower($request->input('login')) . '|' . $request->ip());
+
+        // 1. IP & Rate Limiter Throttle Check
+        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+
+            throw ValidationException::withMessages([
+                'login' => trans('auth.throttle', [
+                    'seconds' => $seconds,
+                    'minutes' => ceil($seconds / 60),
+                ]),
+            ]);
+        }
+
+        // 2. Locate user record
         $user = User::where('email', $request->login)
             ->orWhere('employee_id', $request->login)
             ->first();
 
+        // 3. Database-Level Account Lockout Check
+        if ($user && $user->isLockedOut()) {
+            $seconds = now()->diffInSeconds($user->locked_until);
+            $minutes = ceil($seconds / 60);
+
+            throw ValidationException::withMessages([
+                'login' => "Your account is temporarily locked due to repeated failed login attempts. Please try again in {$minutes} minute(s).",
+            ]);
+        }
+
+        // 4. Validate Password & Record Failures
         if (! $user || ! Hash::check($request->password, $user->password)) {
+            RateLimiter::hit($throttleKey, 300);
+
+            if ($user) {
+                $user->recordFailedLoginAttempt();
+
+                // Check if input matches any previously recorded password in PasswordHistory
+                $usedOldPassword = $user->passwordHistories()
+                    ->get()
+                    ->contains(fn ($history) => Hash::check($request->password, $history->password));
+
+                if ($usedOldPassword) {
+                    throw ValidationException::withMessages([
+                        'login' => 'You entered an old password. Please use your current password or request a password reset.',
+                    ]);
+                }
+            }
+
             throw ValidationException::withMessages([
                 'login' => __('auth.failed'),
             ]);
         }
 
-        // 2. Email verification check
+        // 5. Successful Password Authentication -> Reset Counters
+        RateLimiter::clear($throttleKey);
+        $user->resetLockout();
+
+        // 6. Email verification check
         if (is_null($user->email_verified_at)) {
             session(['pending_otp_email' => $user->email]);
 
@@ -85,7 +132,7 @@ class AuthenticatedSessionController extends Controller
             );
         }
 
-        // 3. Active account check
+        // 7. Active account check
         if (! $user->is_active) {
             return back()
                 ->withInput($request->only('login'))
@@ -94,7 +141,7 @@ class AuthenticatedSessionController extends Controller
                 ]);
         }
 
-        // 4. Recognized Trusted Device -> Grant immediate session access
+        // 8. Recognized Trusted Device -> Grant immediate session access
         $deviceKey = $request->cookie('lodis_device_key');
         $isTrusted = $deviceKey && UserDevice::where('user_id', $user->id)->where('device_key', $deviceKey)->exists();
 
@@ -112,7 +159,7 @@ class AuthenticatedSessionController extends Controller
             return redirect()->intended(route('dashboard'));
         }
 
-        // 5. Unrecognized Device -> Stage session & route to device-wait
+        // 9. Unrecognized Device -> Stage session & route to device-wait
         session([
             'pending_auth_user_id' => $user->id,
             'pending_auth_remember' => $request->boolean('remember'),
@@ -133,7 +180,7 @@ class AuthenticatedSessionController extends Controller
             'status' => 'pending',
             'expires_at' => now()->addMinutes(5),
         ]);
-        
+
         // Populate database notifications table for review later
         $user->notify(new DeviceSignInAttemptNotification($authRequest));
 

@@ -21,9 +21,15 @@
                             <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
                                 <tr>
                                     <td>
-                                        <img src="{{ $message->embed(public_path('images/LODISv2.png')) }}" 
-                                             alt="LODISv2 - Lendell Online Digital Interactive System" 
-                                             style="max-height: 48px; width: auto; display: block; border: 0; outline: none; text-decoration: none;">
+                                        @if (file_exists(public_path('images/LODISv2.png')))
+                                            <img src="{{ $message->embed(public_path('images/LODISv2.png')) }}" 
+                                                 alt="LODISv2 - Lendell Online Digital Interactive System" 
+                                                 style="max-height: 48px; width: auto; display: block; border: 0; outline: none; text-decoration: none;">
+                                        @else
+                                            <h1 style="margin: 0; font-size: 20px; font-weight: 800; color: #00687A;">
+                                                LODIS<span style="color: #0F172A;">v2</span>
+                                            </h1>
+                                        @endif
                                     </td>
                                 </tr>
                             </table>

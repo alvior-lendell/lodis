@@ -1,15 +1,11 @@
-@php
-    $selectedMethod = old('method', 'email');
-@endphp
-
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="h-full bg-slate-50">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    
-    <title>Reset Password — LODISv2</title>
+
+    <title>Forgot Password — LODISv2</title>
 
     <!-- Favicon & PWA Directives -->
     <link rel="shortcut icon" href="{{ asset('favicon.ico') }}?v={{ time() }}">
@@ -25,16 +21,16 @@
     <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet" />
 
     <!-- Compiled Assets via Vite -->
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @vite(['resources/css/app.css', 'resources/js/app.js', 'resources/js/auth.js'])
 </head>
 <body class="min-h-screen font-sans antialiased bg-slate-50 text-slate-900 relative selection:bg-brand selection:text-white">
 
     <div class="min-h-screen flex flex-col lg:flex-row">
-        
+
         <!-- Form Panel -->
         <div class="order-1 lg:order-2 lg:w-1/2 flex items-center justify-center p-6 sm:p-10 lg:p-16 bg-white relative">
             <div id="auth-container" class="w-full max-w-md transition-all duration-200">
-                
+
                 <!-- Mobile Brand Header -->
                 <div class="lg:hidden text-center mb-8">
                     <img src="{{ asset('images/LODISv2.png') }}" alt="LODISv2" class="h-12 w-auto mx-auto mb-3 object-contain">
@@ -92,7 +88,7 @@
                     <!-- Verification Channel Selection -->
                     <div class="space-y-3 pt-2">
                         <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Select Reset Channel</label>
-                        
+
                         <!-- Email Option -->
                         <label class="block p-3.5 rounded-2xl border cursor-pointer transition flex items-center justify-between border-slate-200 hover:border-brand hover:bg-slate-50/50 has-[:checked]:border-brand has-[:checked]:bg-brand/5 has-[:checked]:ring-2 has-[:checked]:ring-brand/15">
                             <div class="flex items-center gap-3">
@@ -105,20 +101,6 @@
                                 </div>
                             </div>
                             <input type="radio" name="method" value="email" {{ $selectedMethod === 'email' ? 'checked' : '' }} class="h-4 w-4 text-brand focus:ring-brand border-slate-300">
-                        </label>
-
-                        <!-- SMS Option -->
-                        <label class="block p-3.5 rounded-2xl border cursor-pointer transition flex items-center justify-between border-slate-200 hover:border-brand hover:bg-slate-50/50 has-[:checked]:border-brand has-[:checked]:bg-brand/5 has-[:checked]:ring-2 has-[:checked]:ring-brand/15">
-                            <div class="flex items-center gap-3">
-                                <div class="p-2 rounded-xl bg-slate-100 text-slate-600">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-                                </div>
-                                <div>
-                                    <span class="block text-xs font-bold text-slate-900">Mobile Phone Confirmation (SMS)</span>
-                                    <span class="block text-[11px] text-slate-500">Confirm linked contact number to reset</span>
-                                </div>
-                            </div>
-                            <input type="radio" name="method" value="sms" {{ $selectedMethod === 'sms' ? 'checked' : '' }} class="h-4 w-4 text-brand focus:ring-brand border-slate-300">
                         </label>
 
                         <!-- Authenticator App (TOTP) Option -->
@@ -136,7 +118,7 @@
                         </label>
                     </div>
 
-                    <button id="submit-btn" type="submit" 
+                    <button id="submit-btn" type="submit"
                         class="w-full mt-6 py-3.5 px-4 rounded-2xl bg-brand hover:bg-brand-hover active:bg-brand-hover text-white text-sm font-bold shadow-lg shadow-brand/20 hover:shadow-xl hover:shadow-brand/30 transition duration-200 ease-in-out flex items-center justify-center gap-2 disabled:opacity-85 disabled:cursor-not-allowed">
                         <svg id="btn-spinner" class="hidden animate-spin h-4 w-4 text-white shrink-0" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>

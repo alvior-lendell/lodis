@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\ProfileUpdateRequest;
+use App\Models\ProfileUpdateRequest as ProfileUpdateRequestModel;
 use App\Models\SecuritySetting;
 use App\Models\UserDevice;
 use Illuminate\Http\RedirectResponse;
@@ -59,48 +60,80 @@ class ProfileController extends Controller
     {
         $user = $request->user();
         $employee = $user->employee;
-
-        // 1. Handle Instant Profile Avatar Upload
+    
+        // 1. Handle Instant Profile Avatar Upload (not subject to HR approval)
         if ($request->hasFile('profile_photo')) {
             $path = $request->file('profile_photo')->store('profile-photos', 'public');
             $target = $employee ?? $user;
-
+    
             if ($target->profile_photo_path) {
                 Storage::disk('public')->delete($target->profile_photo_path);
             }
-
+    
             $target->profile_photo_path = $path;
             $target->save();
-
+    
             return Redirect::route('profile.edit')->with('status', 'Profile photo updated successfully.');
         }
-
-        // 2. Handle Profile Information Updates
+    
+        // 2. Personal info changes require HR approval — never write to employees directly
+        if (! $employee) {
+            return Redirect::route('profile.edit')->withErrors([
+                'profile' => 'No employee record is linked to your account. Contact HR to set this up first.',
+            ]);
+        }
+    
+        // Block duplicate submissions while a request is still pending
+        $existingPending = $user->profileUpdateRequests()->where('status', 'pending')->first();
+    
+        if ($existingPending) {
+            return Redirect::route('profile.edit')->withErrors([
+                'profile' => 'You already have a profile change request awaiting HR approval. Please wait for it to be reviewed before submitting another.',
+            ]);
+        }
+    
         $validated = $request->validated();
-
-        if ($employee) {
-            $employee->fill([
-                'first_name'     => $validated['first_name'] ?? $employee->first_name,
-                'middle_name'    => array_key_exists('middle_name', $validated) ? $validated['middle_name'] : $employee->middle_name,
-                'last_name'      => $validated['last_name'] ?? $employee->last_name,
-                'suffix'         => array_key_exists('suffix', $validated) ? $validated['suffix'] : $employee->suffix,
-                'contact_number' => array_key_exists('contact_number', $validated) ? $validated['contact_number'] : $employee->contact_number,
-                'gender'         => $validated['gender'] ?? $employee->gender,
-                'birthdate'      => $validated['birthdate'] ?? $employee->birthdate,
-                'address'        => array_key_exists('address', $validated) ? $validated['address'] : $employee->address,
-            ])->save();
+    
+        $fields = [
+            'first_name',
+            'middle_name',
+            'last_name',
+            'suffix',
+            'contact_number',
+            'gender',
+            'birthdate',
+            'address',
+        ];
+    
+        // Only include fields that actually changed, compared to the current employee record
+        $payload = [];
+        foreach ($fields as $field) {
+            if (! array_key_exists($field, $validated)) {
+                continue;
+            }
+    
+            $newValue = $validated[$field];
+            $currentValue = $field === 'birthdate' && $employee->birthdate
+                ? $employee->birthdate->format('Y-m-d')
+                : $employee->{$field};
+    
+            if ((string) $newValue !== (string) $currentValue) {
+                $payload[$field] = $newValue;
+            }
         }
-
-        // Synchronize User.name with modified name components
-        $firstName = $validated['first_name'] ?? $employee?->first_name ?? '';
-        $lastName  = $validated['last_name'] ?? $employee?->last_name ?? '';
-
-        if ($firstName || $lastName) {
-            $user->name = trim("{$firstName} {$lastName}");
-            $user->save();
+    
+        if (empty($payload)) {
+            return Redirect::route('profile.edit')->with('status', 'No changes detected — nothing was submitted.');
         }
-
-        return Redirect::route('profile.edit')->with('status', 'Profile details updated successfully.');
+    
+        ProfileUpdateRequestModel::create([
+            'user_id'     => $user->id,
+            'employee_id' => $employee->id,
+            'payload'     => $payload,
+            'status'      => 'pending',
+        ]);
+    
+        return Redirect::route('profile.edit')->with('status', 'Your profile change request has been submitted and is awaiting HR approval.');
     }
 
     /**

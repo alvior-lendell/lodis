@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\System;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -17,12 +18,12 @@ class UserController extends Controller
     public function index(Request $request)
     {
         $query = User::query();
-    
+
         // Hide Superadmin accounts from non-Superadmin users
         if (! auth()->user()->isSuperadmin()) {
             $query->where('role', '!=', 'Superadmin');
         }
-    
+
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
@@ -31,7 +32,7 @@ class UserController extends Controller
                   ->orWhere('employee_id', 'like', "%{$search}%");
             });
         }
-    
+
         if ($request->filled('role')) {
             // Prevent non-Superadmins from querying Superadmin roles directly via URL parameter
             if ($request->role === 'Superadmin' && ! auth()->user()->isSuperadmin()) {
@@ -39,9 +40,9 @@ class UserController extends Controller
             }
             $query->where('role', $request->role);
         }
-    
+
         $users = $query->latest()->paginate(15)->withQueryString();
-    
+
         return view('users.index', compact('users'));
     }
 
@@ -63,7 +64,7 @@ class UserController extends Controller
     public function store(Request $request)
     {
         // Restrict role assignment options based on creator role
-        $allowedRoles = auth()->user()->role === 'Superadmin' 
+        $allowedRoles = auth()->user()->isSuperadmin()
             ? ['Superadmin', 'Admin', 'Employee'] 
             : ['Admin', 'Employee'];
 
@@ -79,34 +80,36 @@ class UserController extends Controller
             'systems.*.role'       => ['nullable', Rule::in(['Superadmin', 'Admin', 'Employee', 'None'])],
         ]);
 
-        $user = User::create([
-            'employee_id'         => $validated['employee_id'],
-            'name'                => $validated['name'],
-            'email'               => $validated['email'],
-            'password'            => Hash::make($validated['password']),
-            'role'                => $validated['role'],
-            'is_active'           => $request->has('is_active'),
-            'password_changed_at' => now(),
-            'email_verified_at'   => now(),
-        ]);
+        DB::transaction(function () use ($request, $validated) {
+            $user = User::create([
+                'employee_id'         => $validated['employee_id'] ?? null,
+                'name'                => $validated['name'],
+                'email'               => $validated['email'],
+                'password'            => Hash::make($validated['password']),
+                'role'                => $validated['role'],
+                'is_active'           => $request->boolean('is_active', true),
+                'password_changed_at' => now(),
+                'email_verified_at'   => now(),
+            ]);
 
-        // Seed initial password into password_histories table
-        $user->recordPasswordHistory();
+            // Seed initial password into password_histories table
+            $user->recordPasswordHistory();
 
-        // Sync system access grants
-        if ($request->has('systems') && is_array($request->input('systems'))) {
-            $syncData = [];
-            foreach ($request->input('systems') as $systemId => $pivot) {
-                $hasAccess = isset($pivot['has_access']) && $pivot['has_access'] == '1';
-                $role = $pivot['role'] ?? 'None';
+            // Sync system access grants
+            if ($request->has('systems') && is_array($request->input('systems'))) {
+                $syncData = [];
+                foreach ($request->input('systems') as $systemId => $pivot) {
+                    $hasAccess = !empty($pivot['has_access']) && ($pivot['has_access'] == '1' || $pivot['has_access'] === true);
+                    $role = $pivot['role'] ?? 'None';
 
-                $syncData[$systemId] = [
-                    'has_access' => $hasAccess ? 1 : 0,
-                    'role'       => $role,
-                ];
+                    $syncData[$systemId] = [
+                        'has_access' => $hasAccess ? 1 : 0,
+                        'role'       => $role,
+                    ];
+                }
+                $user->systems()->sync($syncData);
             }
-            $user->systems()->sync($syncData);
-        }
+        });
 
         return redirect()->route('users.index')->with('status', 'User account created successfully with system grants.');
     }
@@ -116,8 +119,8 @@ class UserController extends Controller
      */
     public function edit(User $user)
     {
-        // Prevent Admin from accessing Superadmin account edit forms
-        if (auth()->user()->role === 'Admin' && $user->role === 'Superadmin') {
+        // Prevent non-Superadmins from accessing Superadmin account edit forms
+        if ($user->role === 'Superadmin' && ! auth()->user()->isSuperadmin()) {
             abort(403, 'Unauthorized access to Superadmin configuration.');
         }
 
@@ -135,13 +138,13 @@ class UserController extends Controller
      */
     public function update(Request $request, User $user)
     {
-        // Prevent Admin from modifying Superadmin accounts
-        if (auth()->user()->role === 'Admin' && $user->role === 'Superadmin') {
+        // Prevent non-Superadmins from modifying Superadmin accounts
+        if ($user->role === 'Superadmin' && ! auth()->user()->isSuperadmin()) {
             abort(403, 'Unauthorized action on Superadmin configuration.');
         }
 
         // Restrict role options based on modifier role
-        $allowedRoles = auth()->user()->role === 'Superadmin' 
+        $allowedRoles = auth()->user()->isSuperadmin()
             ? ['Superadmin', 'Admin', 'Employee'] 
             : ['Admin', 'Employee'];
 
@@ -157,49 +160,51 @@ class UserController extends Controller
             'systems.*.role'       => ['nullable', Rule::in(['Superadmin', 'Admin', 'Employee', 'None'])],
         ]);
 
-        $updateData = [
-            'employee_id' => $validated['employee_id'],
-            'name'        => $validated['name'],
-            'email'       => $validated['email'],
-            'role'        => $validated['role'],
-            'is_active'   => $request->has('is_active'),
-        ];
+        DB::transaction(function () use ($request, $user, $validated) {
+            $updateData = [
+                'employee_id' => $validated['employee_id'] ?? null,
+                'name'        => $validated['name'],
+                'email'       => $validated['email'],
+                'role'        => $validated['role'],
+                'is_active'   => $request->boolean('is_active'),
+            ];
 
-        // Handle password updates with historical checks and audit logging
-        if ($request->filled('password')) {
-            $newPassword = $request->input('password');
+            // Handle password updates with historical checks and audit logging
+            if ($request->filled('password')) {
+                $newPassword = $request->input('password');
 
-            if ($user->isPasswordReused($newPassword)) {
-                throw ValidationException::withMessages([
-                    'password' => ['The new password cannot be one of the recent passwords used by this account.'],
-                ]);
+                if ($user->isPasswordReused($newPassword)) {
+                    throw ValidationException::withMessages([
+                        'password' => ['The new password cannot be one of the recent passwords used by this account.'],
+                    ]);
+                }
+
+                // Archive the existing active password hash before replacing
+                $user->recordPasswordHistory();
+
+                $updateData['password'] = Hash::make($newPassword);
+                $updateData['password_changed_at'] = now();
             }
 
-            // Archive the existing active password hash before replacing
-            $user->recordPasswordHistory();
+            $user->update($updateData);
 
-            $updateData['password'] = Hash::make($newPassword);
-            $updateData['password_changed_at'] = now();
-        }
+            // Sync system access grants
+            if ($request->has('systems') && is_array($request->input('systems'))) {
+                $syncData = [];
+                foreach ($request->input('systems') as $systemId => $pivot) {
+                    $hasAccess = !empty($pivot['has_access']) && ($pivot['has_access'] == '1' || $pivot['has_access'] === true);
+                    $role = $pivot['role'] ?? 'None';
 
-        $user->update($updateData);
-
-        // Sync system access grants
-        if ($request->has('systems') && is_array($request->input('systems'))) {
-            $syncData = [];
-            foreach ($request->input('systems') as $systemId => $pivot) {
-                $hasAccess = isset($pivot['has_access']) && $pivot['has_access'] == '1';
-                $role = $pivot['role'] ?? 'None';
-
-                $syncData[$systemId] = [
-                    'has_access' => $hasAccess ? 1 : 0,
-                    'role'       => $role,
-                ];
+                    $syncData[$systemId] = [
+                        'has_access' => $hasAccess ? 1 : 0,
+                        'role'       => $role,
+                    ];
+                }
+                $user->systems()->sync($syncData);
+            } else {
+                $user->systems()->detach();
             }
-            $user->systems()->sync($syncData);
-        } else {
-            $user->systems()->detach();
-        }
+        });
 
         return redirect()->route('users.index')->with('status', 'User account and system grants updated.');
     }
@@ -209,7 +214,7 @@ class UserController extends Controller
      */
     public function destroy(User $user)
     {
-        if (auth()->user()->role !== 'Superadmin') {
+        if (! auth()->user()->isSuperadmin()) {
             abort(403, 'Unauthorized action. Only Superadmins can delete user accounts.');
         }
 
@@ -217,8 +222,10 @@ class UserController extends Controller
             return redirect()->route('users.index')->with('status', 'You cannot delete your own active account.');
         }
 
-        $user->systems()->detach();
-        $user->delete();
+        DB::transaction(function () use ($user) {
+            $user->systems()->detach();
+            $user->delete();
+        });
 
         return redirect()->route('users.index')->with('status', 'User account removed.');
     }

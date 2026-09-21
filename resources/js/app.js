@@ -5,12 +5,6 @@ window.Alpine = Alpine;
 Alpine.start();
 
 import './echo';
-import './auth';
-import './register';
-import './forgot';
-import './verify';
-import './reset';
-import './expired';
 
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
