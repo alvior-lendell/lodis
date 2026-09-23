@@ -16,11 +16,24 @@ use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 
+/*
+|--------------------------------------------------------------------------
+| Guest Security & Authentication Pipelines
+|--------------------------------------------------------------------------
+*/
 Route::middleware('guest')->group(function () {
-    // Registration Routes
-    Route::get('register', [RegisteredUserController::class, 'create'])
-        ->name('register');
+    // Guest Landing & Credential Sign-In
+    Route::get('/', [AuthenticatedSessionController::class, 'create'])->name('login');
+    Route::post('/', [AuthenticatedSessionController::class, 'store'])->middleware('throttle:5,1');
 
+    Route::get('login', function () {
+        return redirect()->route('login');
+    });
+    Route::post('login', [AuthenticatedSessionController::class, 'store'])->middleware('throttle:5,1');
+
+    // User Registration Pipeline
+    Route::get('register', [RegisteredUserController::class, 'create'])->name('register');
+    
     Route::post('register/check-email', [RegisteredUserController::class, 'checkEmail'])
         ->middleware('throttle:10,1')
         ->name('register.check-email');
@@ -49,21 +62,7 @@ Route::middleware('guest')->group(function () {
     Route::post('register/verify-otp/switch-method', [RegisteredUserController::class, 'switchMethod'])
         ->name('register.otp.switch-method');
 
-    // Authentication Routes (Root & /login mapping)
-    Route::get('/', [AuthenticatedSessionController::class, 'create'])
-        ->name('login');
-
-    Route::post('/', [AuthenticatedSessionController::class, 'store'])
-        ->middleware('throttle:5,1');
-
-    Route::get('login', function () {
-        return redirect('/');
-    });
-
-    Route::post('login', [AuthenticatedSessionController::class, 'store'])
-        ->middleware('throttle:5,1');
-
-    // SMS Phone Number Verification Routes
+    // SMS Phone Number Verification
     Route::get('verify-sms', [SmsVerificationController::class, 'create'])
         ->name('verification.sms');
 
@@ -75,7 +74,7 @@ Route::middleware('guest')->group(function () {
         ->middleware('throttle:3,1')
         ->name('verification.sms.resend');
 
-    // TOTP / Authenticator App Verification Routes
+    // TOTP / Authenticator App Verification
     Route::get('verify-authenticator', [TwoFactorAuthenticationController::class, 'create'])
         ->name('2fa.authenticator');
 
@@ -83,7 +82,7 @@ Route::middleware('guest')->group(function () {
         ->middleware('throttle:6,1')
         ->name('2fa.authenticator.verify');
 
-    // Workstation & Device Verification Wait/Finalize/Fallback
+    // Workstation & Device Verification Streams
     Route::get('/auth/device-wait/{id}', [DeviceVerificationController::class, 'showWait'])
         ->name('device.wait');
 
@@ -99,7 +98,7 @@ Route::middleware('guest')->group(function () {
         ->middleware('throttle:5,1')
         ->name('device.fallback-otp');
 
-    // Dedicated Device Authorization OTP Routes
+    // Dedicated Device Authorization OTP
     Route::get('/auth/device-otp', [DeviceVerificationController::class, 'showOtp'])
         ->name('device.otp');
 
@@ -114,7 +113,7 @@ Route::middleware('guest')->group(function () {
         ->middleware('throttle:3,1')
         ->name('device.otp.resend');
 
-    // Password Reset Routes
+    // Credential Recovery & Password Reset
     Route::get('forgot-password', [PasswordResetLinkController::class, 'create'])
         ->name('password.request');
 
@@ -122,7 +121,6 @@ Route::middleware('guest')->group(function () {
         ->middleware('throttle:5,1')
         ->name('password.email');
 
-    // Authenticator App Password Reset Routes
     Route::get('forgot-password/authenticator', [PasswordResetLinkController::class, 'showAuthenticatorForm'])
         ->name('password.authenticator');
 
@@ -130,24 +128,20 @@ Route::middleware('guest')->group(function () {
         ->middleware('throttle:6,1')
         ->name('password.authenticator.verify');
 
-    // Display password reset form
     Route::get('reset-password/{token}', [NewPasswordController::class, 'create'])
         ->name('password.reset');
 
-    // Handle password update submission
     Route::post('reset-password', [NewPasswordController::class, 'store'])
         ->name('password.store');
 });
 
+/*
+|--------------------------------------------------------------------------
+| Authenticated Identity & Security Controls
+|--------------------------------------------------------------------------
+*/
 Route::middleware('auth')->group(function () {
-
-    // Register "Mark All Read" Route
-    Route::post('/notifications/mark-all-read', function () {
-        auth()->user()->unreadNotifications->markAsRead();
-        return back()->with('status', 'All notifications marked as read.');
-    })->name('notifications.markAllRead');
-
-    // Email Verification Routes
+    // Email Verification Prompts & Callbacks
     Route::get('verify-email', EmailVerificationPromptController::class)
         ->name('verification.notice');
 
@@ -159,7 +153,7 @@ Route::middleware('auth')->group(function () {
         ->middleware('throttle:6,1')
         ->name('verification.send');
 
-    // Password Confirmation & Updates
+    // Password Re-confirmation, Expiry, & Modification[cite: 6]
     Route::get('confirm-password', [ConfirmablePasswordController::class, 'show'])
         ->name('password.confirm');
 
@@ -169,21 +163,23 @@ Route::middleware('auth')->group(function () {
     Route::put('password', [PasswordController::class, 'update'])
         ->name('password.update');
 
-    // Expired Password Routes
     Route::get('password/expired', [ExpiredPasswordController::class, 'show'])
         ->name('password.expired');
 
     Route::post('password/expired', [ExpiredPasswordController::class, 'update'])
         ->name('password.expired.update');
 
-    // Active Session Management (Revoke Specific & All Other Browser Sessions)
+    // Active Browser Session Management[cite: 7]
     Route::post('/profile/sessions/revoke-others', [ProfileController::class, 'revokeOtherSessions'])
         ->name('sessions.revoke-others');
 
     Route::delete('/profile/sessions/{sessionId}', [ProfileController::class, 'revokeSession'])
         ->name('sessions.revoke');
 
-    // Trusted Device Authorization & Revocation
+    // Trusted Device Authorizations & Revocations
+    Route::get('/auth/device-review/{id}', [DeviceVerificationController::class, 'review'])
+        ->name('device.review');
+
     Route::post('/auth/device-approve/{id}', [DeviceVerificationController::class, 'approve'])
         ->name('device.approve');
 
@@ -193,7 +189,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile/devices/{device}', [ProfileController::class, 'revokeDevice'])
         ->name('devices.revoke');
 
-    // Session Logout
+    // Session Termination
     Route::post('logout', [AuthenticatedSessionController::class, 'destroy'])
         ->name('logout');
 });

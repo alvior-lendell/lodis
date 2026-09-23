@@ -124,7 +124,8 @@
                     <!-- Details Body -->
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center justify-between gap-2">
-                            <a href="{{ $url }}" class="text-xs sm:text-sm font-extrabold text-slate-900 hover:text-brand transition truncate">
+                            <a href="{{ route('notifications.read', $notification->id) }}" 
+                               class="text-xs sm:text-sm font-extrabold text-slate-900 hover:text-brand transition truncate">
                                 {{ $notification->data['title'] ?? 'System Update' }}
                             </a>
                             <span class="text-[11px] text-slate-400 shrink-0 font-mono">

@@ -22,6 +22,7 @@ class DeviceAuthorizationRequested implements ShouldBroadcastNow
             'user_id' => $authorization->user_id,
             'device_name' => $authorization->device_name,
             'ip_address' => $authorization->ip_address,
+            'location' => $authorization->location ?? 'Unknown Location',
             'created_at' => $authorization->created_at->diffForHumans(),
         ];
     }

@@ -10,6 +10,7 @@ use App\Models\OtpVerification;
 use App\Models\User;
 use App\Models\UserDevice;
 use App\Notifications\DeviceSignInAttemptNotification;
+use App\Rules\Turnstile;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -29,9 +30,17 @@ class AuthenticatedSessionController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $request->validate([
+        $rules = [
             'login' => ['required', 'string'],
             'password' => ['required', 'string'],
+        ];
+
+        if (config('services.turnstile.key')) {
+            $rules['cf-turnstile-response'] = ['required', new Turnstile()];
+        }
+
+        $request->validate($rules, [
+            'cf-turnstile-response.required' => 'Please complete the Cloudflare security challenge.',
         ]);
 
         $throttleKey = Str::transliterate(Str::lower($request->input('login')) . '|' . $request->ip());
@@ -66,22 +75,32 @@ class AuthenticatedSessionController extends Controller
         // 4. Validate Password & Record Failures
         if (! $user || ! Hash::check($request->password, $user->password)) {
             RateLimiter::hit($throttleKey, 300);
-
+        
             if ($user) {
                 $user->recordFailedLoginAttempt();
-
+        
+                // Immediately throw lockout exception if the 5th attempt triggered the lock
+                if ($user->isLockedOut()) {
+                    $seconds = now()->diffInSeconds($user->locked_until);
+                    $minutes = ceil($seconds / 60);
+        
+                    throw ValidationException::withMessages([
+                        'login' => "Your account has been temporarily locked due to repeated failed login attempts. Please try again in {$minutes} minute(s).",
+                    ]);
+                }
+        
                 // Check if input matches any previously recorded password in PasswordHistory
                 $usedOldPassword = $user->passwordHistories()
                     ->get()
                     ->contains(fn ($history) => Hash::check($request->password, $history->password));
-
+        
                 if ($usedOldPassword) {
                     throw ValidationException::withMessages([
                         'login' => 'You entered an old password. Please use your current password or request a password reset.',
                     ]);
                 }
             }
-
+        
             throw ValidationException::withMessages([
                 'login' => __('auth.failed'),
             ]);
@@ -169,15 +188,20 @@ class AuthenticatedSessionController extends Controller
         $platform = preg_match('/Windows/i', $agent) ? 'Windows PC' : (preg_match('/Mac/i', $agent) ? 'macOS' : 'Mobile Device');
         $browser = preg_match('/Chrome/i', $agent) ? 'Chrome' : (preg_match('/Firefox/i', $agent) ? 'Firefox' : 'Browser');
         $deviceName = "{$platform} ({$browser})";
+        
+        $loc = \App\Services\DeviceVerificationService::resolveLocationDetails($request->ip(), $request);
 
         $authRequest = DeviceAuthorization::create([
-            'id' => (string) Str::uuid(),
-            'user_id' => $user->id,
-            'device_key' => Str::random(40),
+            'id'          => (string) Str::uuid(),
+            'user_id'     => $user->id,
+            'device_key'  => Str::random(40),
             'device_name' => $deviceName,
-            'ip_address' => $request->ip(),
+            'ip_address'  => $request->ip(),
+            'location'   => $loc['location'],
+            'latitude'   => $loc['latitude'],
+            'longitude'  => $loc['longitude'],
             'user_agent' => $agent,
-            'status' => 'pending',
+            'status'     => 'pending',
             'expires_at' => now()->addMinutes(5),
         ]);
 

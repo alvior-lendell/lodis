@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Traits\Auditable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Http\Request;
 
 class AuthenticationLog extends Model
 {
+    use Auditable;
+    
     public $timestamps = false;
 
     public const EVENT_LOGIN = 'login';

@@ -24,7 +24,7 @@ class DeviceSignInAttemptNotification extends Notification
         return [
             'title' => 'Security Alert: New Workstation Sign-In',
             'message' => "Sign-in attempt detected from {$this->authorization->device_name} (IP: {$this->authorization->ip_address}).",
-            'url' => route('device.wait', $this->authorization->id),
+            'url' => route('device.review', $this->authorization->id),
             'type' => 'security_alert',
             'device_id' => $this->authorization->id,
             'ip_address' => $this->authorization->ip_address,

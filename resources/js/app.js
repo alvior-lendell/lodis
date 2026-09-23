@@ -5,6 +5,7 @@ window.Alpine = Alpine;
 Alpine.start();
 
 import './echo';
+import './it-chatbot';
 
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

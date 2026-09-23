@@ -48,4 +48,22 @@ class NotificationController extends Controller
 
         return back()->with('status', 'Notification deleted successfully.');
     }
+    
+    public function readAndRedirect(string $id): RedirectResponse
+    {
+        $notification = auth()->user()->notifications()->where('id', $id)->first();
+    
+        if ($notification) {
+            if (is_null($notification->read_at)) {
+                $notification->markAsRead();
+            }
+    
+            // Redirect to notification URL if present, fallback to dashboard
+            $targetUrl = $notification->data['url'] ?? route('dashboard');
+    
+            return redirect($targetUrl);
+        }
+    
+        return redirect()->route('notifications.index');
+    }
 }

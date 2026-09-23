@@ -9,6 +9,8 @@ use App\Models\OtpVerification;
 use App\Models\SecuritySetting;
 use App\Models\User;
 use App\Models\UserDevice;
+use App\Notifications\UserRegisteredNotification;
+use App\Notifications\RegistrationSuccessfulNotification;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
@@ -20,6 +22,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules;
 use Illuminate\View\View;
@@ -299,6 +302,7 @@ class RegisteredUserController extends Controller
             ->first();
 
         $totpSecret = ($method === 'authenticator') ? encrypt(session('pending_totp_secret')) : null;
+        $isNewRegistration = false;
 
         if (! $user) {
             $user = User::create([
@@ -313,6 +317,7 @@ class RegisteredUserController extends Controller
                 'two_factor_secret' => $totpSecret,
                 'email_verified_at' => now(),
             ]);
+            $isNewRegistration = true;
         } else {
             if (is_null($user->email_verified_at)) {
                 $user->forceFill([
@@ -320,17 +325,31 @@ class RegisteredUserController extends Controller
                     'preferred_2fa_method' => $method,
                     'two_factor_secret' => $totpSecret ?? $user->two_factor_secret,
                 ])->save();
+                $isNewRegistration = true;
             }
+        }
+        
+        // Notify admins & the newly registered user
+        if ($isNewRegistration) {
+            $adminRecipients = User::whereIn('role', ['Superadmin', 'Admin'])
+                ->where('is_active', true)
+                ->get();
+
+            // Notify Superadmins and Admins
+            Notification::send($adminRecipients, new UserRegisteredNotification($user));
+
+            // Notify the newly registered user
+            $user->notify(new RegistrationSuccessfulNotification());
         }
 
         session()->forget(['pending_otp_email', 'pending_registration', 'active_otp_method', 'pending_totp_secret']);
 
         Auth::login($user);
 
-        // Register initial device automatically upon completing registration
-        $deviceKey = (string) Str::uuid();
+        // Reuse existing device cookie if present on this workstation, otherwise generate a new UUID
+        $deviceKey = $request->cookie('lodis_device_key') ?? (string) Str::uuid();
         $agent = $request->userAgent() ?? '';
-
+        
         $platform = 'Unknown OS';
         if (preg_match('/Windows/i', $agent)) {
             $platform = 'Windows PC';
@@ -343,7 +362,7 @@ class RegisteredUserController extends Controller
         } elseif (preg_match('/iPhone|iPad|iPod/i', $agent)) {
             $platform = 'iOS';
         }
-
+        
         $browser = 'Unknown Browser';
         if (preg_match('/Edg/i', $agent)) {
             $browser = 'Microsoft Edge';
@@ -356,19 +375,24 @@ class RegisteredUserController extends Controller
         } elseif (preg_match('/Opera|OPR/i', $agent)) {
             $browser = 'Opera';
         }
-
-        UserDevice::create([
-            'user_id' => $user->id,
-            'device_key' => $deviceKey,
-            'device_name' => "{$platform} — {$browser}",
-            'platform' => $platform,
-            'browser' => $browser,
-            'ip_address' => $request->ip(),
-            'user_agent' => $agent,
-            'is_trusted' => true,
-            'last_active_at' => now(),
-        ]);
-
+        
+        // Upsert device record so this device_key is linked to the newly registered user
+        UserDevice::updateOrCreate(
+            [
+                'user_id' => $user->id,
+                'device_key' => $deviceKey,
+            ],
+            [
+                'device_name' => "{$platform} — {$browser}",
+                'platform' => $platform,
+                'browser' => $browser,
+                'ip_address' => $request->ip(),
+                'user_agent' => $agent,
+                'is_trusted' => true,
+                'last_active_at' => now(),
+            ]
+        );
+        
         // Set persistent 1-year device cookie (525600 minutes)
         Cookie::queue('lodis_device_key', $deviceKey, 525600);
 

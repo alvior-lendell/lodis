@@ -154,7 +154,17 @@
 
                     <!-- Cloudflare Turnstile Field -->
                     @if (config('services.turnstile.key'))
-                        <div class="cf-turnstile my-4" data-sitekey="{{ config('services.turnstile.key') }}" data-theme="light"></div>
+                        <div class="my-4 p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col items-center justify-center gap-2 shadow-inner">
+                            <div class="cf-turnstile w-full flex justify-center" 
+                                 data-sitekey="{{ config('services.turnstile.key') }}" 
+                                 data-theme="light"
+                                 data-size="flexible"
+                                 data-appearance="interaction-only">
+                            </div>
+                            <p class="text-[10px] text-slate-400 font-medium text-center">
+                                Protected by Cloudflare Turnstile Zero-Trust Access
+                            </p>
+                        </div>
                     @endif
 
                     <button id="submit-btn" type="submit"

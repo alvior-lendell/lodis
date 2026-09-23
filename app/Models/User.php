@@ -2,12 +2,14 @@
 
 namespace App\Models;
 
+use App\Traits\Auditable;
 use App\Models\AuthenticationLog;
 use App\Models\Employee;
 use App\Models\PasswordHistory;
 use App\Models\ProfileUpdateRequest;
 use App\Models\System;
 use App\Notifications\ResetPasswordNotification;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -18,7 +20,7 @@ use Illuminate\Support\Facades\Hash;
 
 class User extends Authenticatable
 {
-    use HasFactory, Notifiable;
+    use HasFactory, Notifiable, Auditable;
 
     /**
      * The attributes that are mass assignable.
@@ -77,14 +79,14 @@ class User extends Authenticatable
      */
     public function recordFailedLoginAttempt(int $maxAttempts = 5, int $lockoutMinutes = 15): void
     {
-        $this->increment('failed_login_attempts');
-
+        $this->failed_login_attempts += 1;
+    
         if ($this->failed_login_attempts >= $maxAttempts) {
-            $this->update([
-                'locked_until' => now()->addMinutes($lockoutMinutes),
-                'failed_login_attempts' => 0,
-            ]);
+            $this->locked_until = now()->addMinutes($lockoutMinutes);
+            $this->failed_login_attempts = 0;
         }
+    
+        $this->save();
     }
 
     /**
@@ -219,5 +221,21 @@ class User extends Authenticatable
     public function deviceAuthorizations(): HasMany
     {
         return $this->hasMany(DeviceAuthorization::class);
+    }
+    
+    /**
+     * Scope query to active Superadmins and Admins.
+     */
+    public function scopeAdminsAndSuperadmins($query)
+    {
+        return $query->whereIn('role', ['Superadmin', 'Admin'])->where('is_active', true);
+    }
+    
+    /**
+     * Scope query to specific active roles dynamically.
+     */
+    public function scopeForRoles($query, array $roles)
+    {
+        return $query->whereIn('role', $roles)->where('is_active', true);
     }
 }

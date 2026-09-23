@@ -10,6 +10,7 @@ use App\Models\Employee;
 use App\Models\OtpVerification;
 use App\Models\User;
 use App\Models\UserDevice;
+use App\Services\DeviceVerificationService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -152,15 +153,15 @@ class DeviceVerificationController extends Controller
         $hasSms = ! empty($phoneNumber);
         $hasAuthenticator = ! empty($user->two_factor_secret);
 
-        return view('auth.device-otp', [
-            'email' => $email,
-            'phoneNumber' => $phoneNumber,
-            'method' => $method,
-            'authId' => $authId,
-            'cooldownSeconds' => $cooldownSeconds,
-            'hasSms' => $hasSms,
-            'hasAuthenticator' => $hasAuthenticator,
-        ]);
+        return view('auth.device-otp', compact(
+            'email',
+            'phoneNumber',
+            'method',
+            'authId',
+            'cooldownSeconds',
+            'hasSms',
+            'hasAuthenticator'
+        ));
     }
 
     public function verifyOtp(Request $request): RedirectResponse
@@ -176,7 +177,6 @@ class DeviceVerificationController extends Controller
 
         $user = User::findOrFail($userId);
 
-        // 1. Authenticator App TOTP Validation
         if ($method === 'authenticator') {
             $request->validate(['otp' => ['required', 'string', 'size:6']]);
 
@@ -190,9 +190,7 @@ class DeviceVerificationController extends Controller
             if (! $google2fa->verifyKey($secret, $request->otp)) {
                 return back()->withErrors(['otp' => 'Invalid Authenticator app code. Please try again.']);
             }
-        }
-        // 2. SMS Registered Phone Number Matching Validation
-        elseif ($method === 'sms') {
+        } elseif ($method === 'sms') {
             $request->validate(['otp' => ['required', 'string']]);
 
             $employee = Employee::where('email', $user->email)
@@ -206,9 +204,7 @@ class DeviceVerificationController extends Controller
             if (empty($targetPhone) || empty($inputPhone) || $inputPhone !== $targetPhone) {
                 return back()->withErrors(['otp' => 'The mobile number entered does not match our employee records.']);
             }
-        }
-        // 3. Email OTP Code Validation
-        else {
+        } else {
             $request->validate(['otp' => ['required', 'string', 'size:6']]);
 
             $record = OtpVerification::where('email', $email)
@@ -224,7 +220,6 @@ class DeviceVerificationController extends Controller
             $record->update(['is_used' => true]);
         }
 
-        // Complete Device Registration & Session Provisioning
         if ($authId) {
             DeviceAuthorization::where('id', $authId)->update(['status' => 'approved']);
         }
@@ -233,6 +228,7 @@ class DeviceVerificationController extends Controller
         $agent = $request->userAgent() ?? '';
         $platform = preg_match('/Windows/i', $agent) ? 'Windows PC' : (preg_match('/Mac/i', $agent) ? 'macOS' : 'Mobile Device');
         $browser = preg_match('/Chrome/i', $agent) ? 'Chrome' : (preg_match('/Firefox/i', $agent) ? 'Firefox' : 'Browser');
+        $location = DeviceVerificationService::resolveLocation($request->ip(), $request);
 
         UserDevice::create([
             'user_id' => $user->id,
@@ -241,6 +237,7 @@ class DeviceVerificationController extends Controller
             'platform' => $platform,
             'browser' => $browser,
             'ip_address' => $request->ip(),
+            'location' => $location, // <-- Ensure location is passed here
             'user_agent' => $agent,
             'last_active_at' => now(),
         ]);
@@ -265,30 +262,30 @@ class DeviceVerificationController extends Controller
     public function approve(Request $request, string $id): RedirectResponse
     {
         $auth = DeviceAuthorization::findOrFail($id);
-    
+
         if ($auth->user_id !== Auth::id()) {
             abort(403);
         }
-    
+
         $auth->update(['status' => 'approved']);
-    
+
         DeviceAuthorizationStatusChanged::dispatch($auth->id, 'approved');
-    
+
         return back()->with('status', 'New device approved successfully.');
     }
 
     public function reject(Request $request, string $id): RedirectResponse
     {
         $auth = DeviceAuthorization::findOrFail($id);
-    
+
         if ($auth->user_id !== Auth::id()) {
             abort(403);
         }
-    
+
         $auth->update(['status' => 'rejected']);
-    
+
         DeviceAuthorizationStatusChanged::dispatch($auth->id, 'rejected');
-    
+
         return back()->with('status', 'Device authorization request rejected.');
     }
 
@@ -300,15 +297,20 @@ class DeviceVerificationController extends Controller
         $agent = $auth->user_agent ?? '';
         $platform = preg_match('/Windows/i', $agent) ? 'Windows PC' : (preg_match('/Mac/i', $agent) ? 'macOS' : 'Mobile Device');
         $browser = preg_match('/Chrome/i', $agent) ? 'Chrome' : (preg_match('/Firefox/i', $agent) ? 'Firefox' : 'Browser');
+        
+        $location = $auth->location ?? DeviceVerificationService::resolveLocation($auth->ip_address, $request);
 
         UserDevice::create([
-            'user_id' => $user->id,
-            'device_key' => $auth->device_key,
-            'device_name' => $auth->device_name,
-            'platform' => $platform,
-            'browser' => $browser,
-            'ip_address' => $auth->ip_address,
-            'user_agent' => $auth->user_agent,
+            'user_id'        => $user->id,
+            'device_key'     => $auth->device_key,
+            'device_name'    => $auth->device_name,
+            'platform'       => $platform,
+            'browser'        => $browser,
+            'ip_address'     => $auth->ip_address,
+            'location'       => $auth->location,
+            'latitude'       => $auth->latitude,
+            'longitude'      => $auth->longitude,
+            'user_agent'     => $auth->user_agent,
             'last_active_at' => now(),
         ]);
 
@@ -321,24 +323,15 @@ class DeviceVerificationController extends Controller
         return redirect()->route('dashboard');
     }
 
-    public function resendOtp(): RedirectResponse
+    public function review(string $id): View
     {
-        $userId = session('pending_device_otp_user_id');
-        $email = session('pending_otp_email');
-        $method = session('active_device_otp_method', 'email');
+        $auth = DeviceAuthorization::findOrFail($id);
 
-        if (! $userId || ! $email) {
-            return redirect()->route('login');
+        if ($auth->user_id !== Auth::id()) {
+            abort(403);
         }
 
-        if ($method !== 'email') {
-            return back()->withErrors(['otp' => 'Resend is only available for Email OTP verification.']);
-        }
-
-        $user = User::findOrFail($userId);
-        $this->dispatchEmailOtp($user, true);
-
-        return back()->with('status', 'A new 6-digit OTP code has been sent to your email.');
+        return view('auth.device-approve', compact('auth'));
     }
 
     private function dispatchEmailOtp(User $user, bool $isResend = false): void

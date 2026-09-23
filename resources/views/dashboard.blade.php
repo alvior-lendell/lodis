@@ -3,12 +3,10 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!-- CSRF Token for Client-Side Fetch Requests -->
     <meta name="csrf-token" content="{{ csrf_token() }}">
     
     <title>Dashboard - LODISv2</title>
 
-    <!-- Favicon & PWA Directives -->
     <link rel="shortcut icon" href="{{ asset('favicon.ico') }}?v={{ time() }}">
     <link rel="apple-touch-icon" href="{{ asset('images/LODISv2.png') }}">
     <meta name="theme-color" content="#00687A">
@@ -17,22 +15,17 @@
     <meta name="apple-mobile-web-app-title" content="LODISv2">
     <link rel="manifest" href="{{ asset('manifest.json') }}">
 
-    <!-- Typography -->
     <link rel="preconnect" href="https://fonts.bunny.net">
     <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet" />
 
-    <!-- Compiled Assets via Vite -->
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="min-h-screen font-sans antialiased bg-slate-50 text-slate-900 flex flex-col">
 
-    <!-- Universal Header Include -->
     @include('partials.header')
 
-    <!-- Main Workspace Content -->
     <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-        <!-- Status Toast Banner -->
         @if (session('status'))
             <div class="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center justify-between shadow-sm">
                 <div class="flex items-center gap-2">
@@ -44,9 +37,7 @@
             </div>
         @endif
 
-        <!-- Universal Welcome Banner -->
         <div class="mb-8 p-6 rounded-2xl bg-gradient-to-r from-brand to-brand-hover text-white shadow-md relative overflow-hidden flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <!-- Left Info: Greetings & Live Clock -->
             <div class="z-10">
                 <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand-light/80">
                     <span id="live-date">--</span>
@@ -59,9 +50,7 @@
                 <p class="text-xs text-brand-light/90 mt-1">Access your operational applications and system modules below.</p>
             </div>
 
-            <!-- Right Info: Live Weather & Dynamic Event Tile -->
             <div class="z-10 flex flex-wrap items-center gap-3 sm:gap-4">
-                <!-- Live Weather Box -->
                 <div class="bg-white/10 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center gap-3 min-w-[150px]">
                     <div id="weather-icon-container" class="text-amber-300 shrink-0">
                         <svg class="w-6 h-6 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -74,7 +63,6 @@
                     </div>
                 </div>
 
-                <!-- Dynamic Same-Day Grouped Event Tile -->
                 <div class="bg-white/10 backdrop-blur-md px-4 py-3 rounded-xl border border-white/10 flex items-center gap-3 max-w-xs min-w-[200px]">
                     <div class="p-2 rounded-lg {{ $isToday ? 'bg-emerald-400/20 text-emerald-300' : 'bg-amber-400/20 text-amber-300' }} shrink-0">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -110,7 +98,6 @@
             </div>
         </div>
 
-        <!-- Admin Overview Banner (Superadmin & Admin only) -->
         @if (in_array($userRole, ['Superadmin', 'Admin']))
             <div class="mb-8 p-5 rounded-2xl bg-white border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
@@ -138,7 +125,6 @@
             </div>
         @endif
 
-        <!-- Section Header -->
         <div class="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
                 <h2 class="text-xl font-extrabold text-slate-900 tracking-tight">System Launcher Grid</h2>
@@ -151,40 +137,47 @@
             </span>
         </div>
 
-        <!-- Systems Grid -->
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             @forelse ($systems as $system)
                 @php
-                    $hasAccess = (bool) $system->employee_has_access;
-                    $role = $system->user_role;
-                    $logoPath = $system->logo ? (str_starts_with($system->logo, 'images/') ? $system->logo : 'images/systems/' . $system->logo) : null;
+                    $hasAccess = (bool)$system->employee_has_access;
+                    $role =$system->user_role;
+                    $logoPath = $system->logo ? (str_starts_with($system->logo, 'images/') ? $system->logo : 'images/systems/' .$system->logo) : null;
+                    $isOnline = (bool)($system->is_online ?? true);
                 @endphp
 
                 <div class="bg-white rounded-2xl border transition duration-200 flex flex-col justify-between overflow-hidden shadow-sm hover:shadow-md 
                     {{ $hasAccess ? 'border-slate-200 hover:border-brand/30' : 'border-slate-200/80 bg-slate-50/50 opacity-75' }}">
                     
                     <div class="p-6 flex flex-col justify-between flex-1">
-                        <!-- Top Row: Role / Access Badge -->
-                        <div class="flex justify-end mb-2">
-                            @if ($hasAccess)
-                                @if ($role === 'Superadmin')
-                                    <span class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-50 text-purple-700 border border-purple-200">Superadmin</span>
-                                @elseif ($role === 'Admin')
-                                    <span class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">Admin</span>
+                        <div class="flex items-center justify-between mb-2">
+                            <!-- Real-time Status Badge (Database state on load, updated via Reverb) -->
+                            <div class="system-card-status flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold {{ $isOnline ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80' : 'bg-rose-50 text-rose-700 border border-rose-200/80' }}"
+                                data-system-id="{{ $system->id }}">
+                                <span class="status-dot w-1.5 h-1.5 rounded-full {{ $isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500' }}"></span>
+                                <span class="status-text">{{ $isOnline ? 'Online' : 'Offline' }}</span>
+                            </div>
+
+                            <div>
+                                @if ($hasAccess)
+                                    @if ($role === 'Superadmin')
+                                        <span class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-purple-50 text-purple-700 border border-purple-200">Superadmin</span>
+                                    @elseif ($role === 'Admin')
+                                        <span class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">Admin</span>
+                                    @else
+                                        <span class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Employee</span>
+                                    @endif
                                 @else
-                                    <span class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">Employee</span>
+                                    <span class="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500 border border-slate-200 flex items-center gap-1">
+                                        <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 08-8 0v4h8z"/>
+                                        </svg>
+                                        Restricted
+                                    </span>
                                 @endif
-                            @else
-                                <span class="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500 border border-slate-200 flex items-center gap-1">
-                                    <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-                                    </svg>
-                                    Restricted
-                                </span>
-                            @endif
+                            </div>
                         </div>
 
-                        <!-- Hero Logo Center Piece -->
                         <div class="py-6 flex items-center justify-center min-h-[110px]">
                             @if ($logoPath && file_exists(public_path($logoPath)))
                                 <img src="{{ asset($logoPath) }}" alt="{{ $system->name }}" class="max-h-24 w-auto object-contain transition-transform duration-200 hover:scale-105">
@@ -199,7 +192,6 @@
                         </div>
                     </div>
 
-                    <!-- Action Footer -->
                     <div class="px-6 py-4 bg-slate-50/80 border-t border-slate-100 flex items-center justify-between">
                         @if ($hasAccess)
                             <a href="{{ $system->url }}" target="_blank" rel="noopener noreferrer" 
@@ -224,7 +216,6 @@
                 </div>
             @endforelse
 
-            <!-- Superadmin Only: Create System Card Tile -->
             @if ($userRole === 'Superadmin')
                 <a href="{{ Route::has('systems.create') ? route('systems.create') : '#' }}" 
                     class="border-2 border-dashed border-slate-300 hover:border-brand rounded-2xl p-6 flex flex-col items-center justify-center text-center transition duration-200 group bg-slate-50/50 hover:bg-white min-h-[220px]">
@@ -240,15 +231,14 @@
         </div>
     </main>
 
-    <!-- Universal Footer Include -->
     @include('partials.footer')
+    
+    @include('partials.it-support-widget')
 
-    <!-- Client Scripts: Clock & Weather -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const userGreetingName = @json($greetingName);
 
-            // Time & Greeting Logic
             function updateClockAndGreeting() {
                 const now = new Date();
                 const hours = now.getHours();
@@ -272,7 +262,6 @@
             updateClockAndGreeting();
             setInterval(updateClockAndGreeting, 1000);
 
-            // Weather Fetch via Open-Meteo for Mandaluyong City
             async function fetchWeather() {
                 try {
                     const response = await fetch('https://api.open-meteo.com/v1/forecast?latitude=14.5792&longitude=121.0359&current_weather=true');
@@ -302,19 +291,50 @@
         });
     </script>
     
-    <!-- Vite Asset / Reverb & Echo Listener Integration -->
-    @vite(['resources/js/app.js'])
-    
+    <!-- Real-Time Reverb WebSockets Listener -->
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             if (typeof window.Echo !== 'undefined') {
                 window.Echo.channel('dashboard-events')
+                    .listen('.health.updated', (e) => {
+                        const healthData = e.healthData || {};
+                        const systemStatuses = healthData.systems || {};
+
+                        // 1. Update system cards in real time
+                        document.querySelectorAll('.system-card-status').forEach((badge) => {
+                            const systemId = badge.getAttribute('data-system-id');
+                            const dot = badge.querySelector('.status-dot');
+                            const text = badge.querySelector('.status-text');
+
+                            if (!dot || !text) return;
+
+                            const status = systemStatuses[systemId] || 'operational';
+
+                            if (status === 'operational') {
+                                badge.className = 'system-card-status flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80';
+                                dot.className = 'status-dot w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse';
+                                text.textContent = 'Online';
+                            } else {
+                                badge.className = 'system-card-status flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200/80';
+                                dot.className = 'status-dot w-1.5 h-1.5 rounded-full bg-rose-500';
+                                text.textContent = 'Offline';
+                            }
+                        });
+
+                        // 2. Update global footer status badge
+                        const footerStatusText = document.getElementById('footer-global-status-text');
+                        const footerStatusDot = document.getElementById('footer-global-status-dot');
+                        if (footerStatusText && footerStatusDot) {
+                            footerStatusText.textContent = healthData.label || 'All Systems Operational';
+                            footerStatusDot.className = healthData.status === 'operational'
+                                ? 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse'
+                                : 'w-2 h-2 rounded-full bg-rose-500';
+                        }
+                    })
                     .listen('.schedule.updated', (e) => {
-                        console.log('Real-time schedule update triggered via Reverb:', e.eventData);
                         window.location.reload(); 
                     })
                     .listen('.system.updated', (e) => {
-                        console.log('System launcher grid updated via Reverb:', e.systemData);
                         window.location.reload();
                     });
             }
