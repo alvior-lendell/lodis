@@ -6,6 +6,7 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\SystemController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\Auth\OtpVerificationController;
 use App\Http\Middleware\EnsurePasswordNotExpired;
 use App\Models\System;
 use Illuminate\Support\Facades\Cache;
@@ -33,80 +34,13 @@ if (app()->environment('local')) {
 |--------------------------------------------------------------------------
 */
 Route::get('/health-check', function () {
-    try {
-        $healthData = Cache::remember('system_health_status', 30, function () {
-            if (!class_exists(System::class)) {
-                return [
-                    'status' => 'operational',
-                    'label' => 'All Systems Operational',
-                    'systems' => []
-                ];
-            }
+    $healthData = Cache::get('system_health_status', [
+        'status' => 'operational',
+        'label' => 'All Systems Operational',
+        'systems' => [],
+    ]);
 
-            $systems = System::where('is_active', 1)->get();
-
-            if ($systems->isEmpty()) {
-                return [
-                    'status' => 'operational',
-                    'label' => 'All Systems Operational',
-                    'systems' => []
-                ];
-            }
-
-            $total = $systems->count();
-            $online = 0;
-            $systemStatuses = [];
-
-            foreach ($systems as $system) {
-                $url = $system->url ?? $system->app_url ?? $system->system_url ?? null;
-
-                if (empty($url) || !filter_var($url, FILTER_VALIDATE_URL)) {
-                    $systemStatuses[$system->id] = 'operational';
-                    $online++;
-                    continue;
-                }
-
-                try {
-                    $response = Http::timeout(2)->withoutVerifying()->get($url);
-                    if ($response->successful()) {
-                        $systemStatuses[$system->id] = 'operational';
-                        $online++;
-                    } else {
-                        $systemStatuses[$system->id] = 'outage';
-                    }
-                } catch (\Throwable $e) {
-                    $systemStatuses[$system->id] = 'outage';
-                }
-            }
-
-            if ($online === $total) {
-                $status = 'operational';
-                $label = 'All Systems Operational';
-            } elseif ($online > 0) {
-                $status = 'degraded';
-                $label = "Partial Outage ({$online}/{$total} Active)";
-            } else {
-                $status = 'outage';
-                $label = 'Major System Outage';
-            }
-
-            return [
-                'status' => $status,
-                'label' => $label,
-                'online' => $online,
-                'total' => $total,
-                'systems' => $systemStatuses,
-            ];
-        });
-
-        return response()->json($healthData);
-    } catch (\Throwable $e) {
-        return response()->json([
-            'status' => 'operational',
-            'label' => 'All Systems Operational',
-            'systems' => [],
-        ]);
-    }
+    return response()->json($healthData);
 })->name('health.check');
 
 /*
@@ -121,12 +55,26 @@ Route::middleware(['auth', 'verified', EnsurePasswordNotExpired::class])->group(
     // Account Profile Settings
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+    Route::delete('/profile/devices/others', [ProfileController::class, 'revokeOtherDevices'])->name('profile.devices.revokeOthers');
+    Route::post('/profile/devices/bulk-delete', [ProfileController::class, 'bulkRevokeDevices'])->name('profile.devices.bulkRevoke');
+    Route::delete('/profile/devices/{device}', [ProfileController::class, 'revokeDevice'])->name('profile.devices.revoke');
 
-    // System & User Management Resources
+    // System Management Resources
     Route::resource('systems', SystemController::class);
-    Route::resource('users', UserController::class);
+    
+    // User Management Sub-Routes (Must be declared BEFORE the resource/wildcard route)
+    Route::get('/users/system-access', [UserController::class, 'systemAccess'])->name('users.system-access');
+    Route::put('/users/{user}/system-access', [UserController::class, 'updateSystemAccess'])->name('users.system-access.update');
 
-    // Holiday Management Grid & One-Click MCP Sync[cite: 2]
+    // OTP Audit Logs Routes
+    Route::get('/users/otp-logs', [OtpVerificationController::class, 'index'])->name('users.otp-logs');
+    Route::delete('/users/otp-logs/{id}', [OtpVerificationController::class, 'destroy'])->name('users.otp-logs.destroy');
+
+    // User Management Resource Route
+    Route::resource('users', UserController::class)->except(['show']);
+
+    // Holiday Management Grid & One-Click MCP Sync
     Route::get('/holidays', [HolidayController::class, 'index'])->name('holidays.index');
     Route::post('/holidays/sync', [HolidayController::class, 'sync'])->name('holidays.sync');
     Route::post('/holidays', [HolidayController::class, 'store'])->name('holidays.store');
@@ -137,7 +85,7 @@ Route::middleware(['auth', 'verified', EnsurePasswordNotExpired::class])->group(
     Route::post('/notifications/mark-all-read', [NotificationController::class, 'markAllRead'])->name('notifications.markAllRead');
     Route::post('/notifications/{id}/mark-read', [NotificationController::class, 'markRead'])->name('notifications.markRead');
     Route::delete('/notifications/{id}', [NotificationController::class, 'destroy'])->name('notifications.destroy');
-    Route::get('/notifications/{id}/read', [NotificationController::class, 'readAndRedirect'])->name('notifications.read');
+    Route::get('/notifications/{id}/read', [NotificationController::class, 'readAndRedirect'])->name('notifications.readAndRedirect');
 });
 
 /*

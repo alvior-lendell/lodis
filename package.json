@@ -23,6 +23,8 @@
         "@laravel/multiplex": "^0.4.1"
     },
     "dependencies": {
-        "upgrade": "^1.1.0"
+        "@vitejs/plugin-vue": "^6.0.9",
+        "upgrade": "^1.1.0",
+        "vue": "^3.5.43"
     }
 }

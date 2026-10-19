@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
 
-    <title>Forgot Password — LODISv2</title>
+    <title>Reset Password — LODISv2</title>
 
     <!-- Favicon & PWA Directives -->
     <link rel="shortcut icon" href="{{ asset('favicon.ico') }}?v={{ time() }}">
@@ -21,11 +21,11 @@
     <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet" />
 
     <!-- Compiled Assets via Vite -->
-    @vite(['resources/css/app.css', 'resources/js/app.js', 'resources/js/auth.js'])
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="min-h-screen font-sans antialiased bg-slate-50 text-slate-900 relative selection:bg-brand selection:text-white">
 
-    <div class="min-h-screen flex flex-col lg:flex-row">
+    <div id="app" class="min-h-screen flex flex-col lg:flex-row">
 
         <!-- Form Panel -->
         <div class="order-1 lg:order-2 lg:w-1/2 flex items-center justify-center p-6 sm:p-10 lg:p-16 bg-white relative">
@@ -66,67 +66,13 @@
                     </div>
                 @endif
 
-                <!-- Password Reset Request Form -->
-                <form id="forgot-password-form" method="POST" action="{{ route('password.email') }}" autocomplete="off" class="space-y-5 transition-opacity duration-200">
-                    @csrf
-
-                    <!-- Email Address Input -->
-                    <div>
-                        <label for="email" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Registered Email Address</label>
-                        <div class="relative rounded-2xl shadow-sm">
-                            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-                                </svg>
-                            </div>
-                            <input id="email" type="email" name="email" value="{{ old('email') }}" required autofocus autocomplete="off"
-                                class="form-input block w-full pl-11 pr-4 py-3.5 rounded-2xl border-slate-200 focus:border-brand focus:ring-4 focus:ring-brand/15 text-sm outline-none transition font-medium placeholder:text-slate-400"
-                                placeholder="email@lendell.ph">
-                        </div>
-                    </div>
-
-                    <!-- Verification Channel Selection -->
-                    <div class="space-y-3 pt-2">
-                        <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Select Reset Channel</label>
-
-                        <!-- Email Option -->
-                        <label class="block p-3.5 rounded-2xl border cursor-pointer transition flex items-center justify-between border-slate-200 hover:border-brand hover:bg-slate-50/50 has-[:checked]:border-brand has-[:checked]:bg-brand/5 has-[:checked]:ring-2 has-[:checked]:ring-brand/15">
-                            <div class="flex items-center gap-3">
-                                <div class="p-2 rounded-xl bg-slate-100 text-slate-600">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                                </div>
-                                <div>
-                                    <span class="block text-xs font-bold text-slate-900">Email Verification Link</span>
-                                    <span class="block text-[11px] text-slate-500">Receive password reset instructions via inbox</span>
-                                </div>
-                            </div>
-                            <input type="radio" name="method" value="email" {{ $selectedMethod === 'email' ? 'checked' : '' }} class="h-4 w-4 text-brand focus:ring-brand border-slate-300">
-                        </label>
-
-                        <!-- Authenticator App (TOTP) Option -->
-                        <label class="block p-3.5 rounded-2xl border cursor-pointer transition flex items-center justify-between border-slate-200 hover:border-brand hover:bg-slate-50/50 has-[:checked]:border-brand has-[:checked]:bg-brand/5 has-[:checked]:ring-2 has-[:checked]:ring-brand/15">
-                            <div class="flex items-center gap-3">
-                                <div class="p-2 rounded-xl bg-slate-100 text-slate-600">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                                </div>
-                                <div>
-                                    <span class="block text-xs font-bold text-slate-900">Authenticator App (TOTP)</span>
-                                    <span class="block text-[11px] text-slate-500">Validate code via 2FA authenticator app</span>
-                                </div>
-                            </div>
-                            <input type="radio" name="method" value="authenticator" {{ $selectedMethod === 'authenticator' ? 'checked' : '' }} class="h-4 w-4 text-brand focus:ring-brand border-slate-300">
-                        </label>
-                    </div>
-
-                    <button id="submit-btn" type="submit"
-                        class="w-full mt-6 py-3.5 px-4 rounded-2xl bg-brand hover:bg-brand-hover active:bg-brand-hover text-white text-sm font-bold shadow-lg shadow-brand/20 hover:shadow-xl hover:shadow-brand/30 transition duration-200 ease-in-out flex items-center justify-center gap-2 disabled:opacity-85 disabled:cursor-not-allowed">
-                        <svg id="btn-spinner" class="hidden animate-spin h-4 w-4 text-white shrink-0" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <span id="btn-label">Continue Recovery Process</span>
-                    </button>
-                </form>
+                <!-- Vue Forgot Password Form Component -->
+                <forgot-password-form 
+                    action-url="{{ route('password.email') }}" 
+                    csrf-token="{{ csrf_token() }}"
+                    old-email="{{ old('email') }}"
+                    selected-method="{{ $selectedMethod }}"
+                ></forgot-password-form>
 
                 <!-- Back to Sign In Link -->
                 <div class="mt-8 pt-6 border-t border-slate-100 text-center">

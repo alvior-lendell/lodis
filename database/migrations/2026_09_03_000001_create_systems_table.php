@@ -13,6 +13,7 @@ return new class extends Migration
     {
         Schema::create('systems', function (Blueprint $table) {
             $table->id();
+            $table->string('slug')->unique()->index();
             $table->string('name');
             $table->string('url');
             $table->text('description')->nullable();

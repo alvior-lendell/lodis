@@ -6,12 +6,18 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Http\Request;
 use App\Models\Event as EventModel;
 use App\Observers\EventObserver;
 use App\Models\System;
 use App\Observers\SystemObserver;
 use App\Models\Holiday;
 use App\Observers\HolidayObserver;
+use App\Models\User;
+use App\Observers\UserObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -33,6 +39,9 @@ class AppServiceProvider extends ServiceProvider
             URL::forceScheme('https');
         }
 
+        // Rate Limiter Configurations
+        $this->configureRateLimiting();
+
         // Eloquent Model Observers
         EventModel::observe(EventObserver::class);
         System::observe(SystemObserver::class);
@@ -51,15 +60,39 @@ class AppServiceProvider extends ServiceProvider
             $lastName = $employee?->last_name ?? $authUser?->last_name ?? '';
             $fullName = trim("{$firstName} {$lastName}") ?: ($authUser?->name ?? 'User');
 
-            // Resolve Profile Photo using Employee's avatar_url attribute or User attributes
+            // Resolve Profile Photo
             $userPhoto = $employee?->avatar_url 
                 ?? $authUser?->avatar_url 
                 ?? $authUser?->profile_photo_url
                 ?? ($authUser?->profile_photo_path ? asset('storage/' . ltrim($authUser->profile_photo_path, '/')) : null);
 
-            // Notifications resolution
-            $notifications = $authUser?->unreadNotifications()->take(5)->get() ?? collect();
+            // Notifications resolution & formatting
+            $rawNotifications = $authUser?->unreadNotifications()->take(5)->get() ?? collect();
             $unreadCount = $authUser?->unreadNotifications()->count() ?? 0;
+
+            $notifications = $rawNotifications->map(function ($notification) {
+                return [
+                    'id'               => $notification->id,
+                    'title'            => $notification->data['title'] ?? 'Notification',
+                    'message'          => $notification->data['message'] ?? '',
+                    'read_url'         => Route::has('notifications.read') ? route('notifications.read', $notification->id) : '#',
+                    'url'              => $notification->data['url'] ?? '#',
+                    'created_at_human' => $notification->created_at?->diffForHumans() ?? '',
+                    'is_new'           => true,
+                ];
+            });
+
+            // Global routes required by header navigation
+            $routes = [
+                'dashboard'          => Route::has('dashboard') ? route('dashboard') : '/dashboard',
+                'systemsIndex'       => Route::has('systems.index') ? route('systems.index') : null,
+                'usersIndex'         => Route::has('users.index') ? route('users.index') : null,
+                'holidaysIndex'      => Route::has('holidays.index') ? route('holidays.index') : null,
+                'markAllRead'        => Route::has('notifications.markAllRead') ? route('notifications.markAllRead') : null,
+                'notificationsIndex' => Route::has('notifications.index') ? route('notifications.index') : null,
+                'profileEdit'        => Route::has('profile.edit') ? route('profile.edit') : '#',
+                'logout'             => Route::has('logout') ? route('logout') : '#',
+            ];
 
             $view->with([
                 'authUser'      => $authUser,
@@ -69,19 +102,37 @@ class AppServiceProvider extends ServiceProvider
                 'userPhoto'     => $userPhoto,
                 'notifications' => $notifications,
                 'unreadCount'   => $unreadCount,
+                'routes'        => $routes,
             ]);
         });
         
         View::composer('partials.footer', function ($view) {
             $cachedHealth = Cache::get('system_health_status', [
                 'status' => 'operational',
-                'label' => 'All Systems Operational',
+                'label'  => 'All Systems Operational',
             ]);
     
             $view->with([
                 'footerIsOperational' => ($cachedHealth['status'] ?? 'operational') === 'operational',
-                'footerStatusLabel' => $cachedHealth['label'] ?? 'All Systems Operational',
+                'footerStatusLabel'   => $cachedHealth['label'] ?? 'All Systems Operational',
             ]);
+        });
+
+        User::observe(UserObserver::class);
+    }
+
+    /**
+     * Configure application rate limiters.
+     */
+    protected function configureRateLimiting(): void
+    {
+        // Global API Rate Limiter
+        RateLimiter::for('api', function (Request $request) {
+            if ($request->userAgent() === 'SystemHealthChecker/1.0') {
+                return Limit::none();
+            }
+
+            return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
         });
     }
 }

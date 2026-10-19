@@ -14,7 +14,14 @@ return new class extends Migration
         Schema::create('profile_update_requests', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('employee_id')->nullable()->constrained('employees')->nullOnDelete();
+            
+            // Explicitly set 'employee_id' as the referenced column
+            $table->string('employee_id')->nullable();
+            $table->foreign('employee_id')
+                ->references('employee_id')
+                ->on('employees')
+                ->onDelete('set null')
+                ->onUpdate('cascade');
             
             // Stores modified profile field key-value pairs
             $table->json('payload');

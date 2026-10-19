@@ -59,11 +59,20 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
+            'email_verified_at'   => 'datetime',
             'password_changed_at' => 'datetime',
-            'locked_until' => 'datetime',
-            'is_active' => 'boolean',
+            'locked_until'        => 'datetime',
+            'is_active'           => 'boolean',
+            'password'            => 'hashed',
         ];
+    }
+
+    /**
+     * Route all broadcast notifications to the existing user-security channel.
+     */
+    public function receivesBroadcastNotificationsOn(): string
+    {
+        return 'user-security.'.$this->id;
     }
 
     /**

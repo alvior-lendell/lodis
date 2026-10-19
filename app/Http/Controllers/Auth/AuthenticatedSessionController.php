@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Mail\SendOtpMail;
 use App\Models\DeviceAuthorization;
 use App\Models\OtpVerification;
+use App\Models\System;
 use App\Models\User;
 use App\Models\UserDevice;
 use App\Notifications\DeviceSignInAttemptNotification;
@@ -14,6 +15,7 @@ use App\Rules\Turnstile;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\RateLimiter;
@@ -23,9 +25,58 @@ use Illuminate\View\View;
 
 class AuthenticatedSessionController extends Controller
 {
-    public function create(): View
+    public function create(Request $request): View|RedirectResponse
     {
-        return view('welcome');
+        // 1. Capture and validate redirect_to domain to prevent open redirect vulnerabilities
+        $redirectTo = $request->query('redirect_to');
+        if ($redirectTo) {
+            $host = parse_url($redirectTo, PHP_URL_HOST);
+            if ($host && str_ends_with($host, 'lendell-local.xyz')) {
+                session(['sso_redirect_to' => $redirectTo]);
+            }
+        }
+
+        // 2. Resolve target subsystem brand configuration from database
+        $system = System::resolveForSso($redirectTo, $request->query('system'));
+
+        // 3. Auto-redirect if user is already authenticated on LODIS
+        if (Auth::check()) {
+            $destination = session()->pull('sso_redirect_to', route('dashboard'));
+            return redirect()->away($destination);
+        }
+
+        // 4. Derive subsystem branding variables for welcome.blade.php
+        $isSubsystem = $system && $system->slug !== 'lodis';
+        $systemName = $system?->name ?? 'LODISv2';
+        $systemLogo = $system?->logo_url ?? asset('images/LODISv2.png');
+        $brandColor = $system?->brand_color ?? '#00687A';
+        $brandHoverColor = $system?->brand_hover_color ?? '#004F5D';
+        
+        if (!empty($system->bg_gradient)) {
+            $bgGradientStyle = str_contains($system->bg_gradient, 'gradient') 
+                ? $system->bg_gradient 
+                : "linear-gradient(135deg, {$system->bg_gradient})";
+        } else {
+            $bgGradientStyle = $isSubsystem 
+                ? "linear-gradient(135deg, #020617 0%, #0f172a 50%, #022c22 100%)" 
+                : "linear-gradient(135deg, #020617 0%, #0f172a 50%, #003843 100%)";
+        }
+
+        // 5. Fetch all active systems for the slideshow panel
+        $systems = System::where('is_active', true)
+            ->get()
+            ->map(fn (System $sys) => $sys->toSlideshowArray());
+
+        return view('welcome', compact(
+            'system',
+            'systems',
+            'isSubsystem',
+            'systemName',
+            'systemLogo',
+            'brandColor',
+            'brandHoverColor',
+            'bgGradientStyle'
+        ));
     }
 
     public function store(Request $request): RedirectResponse
@@ -72,35 +123,58 @@ class AuthenticatedSessionController extends Controller
             ]);
         }
 
-        // 4. Validate Password & Record Failures
-        if (! $user || ! Hash::check($request->password, $user->password)) {
+        // 4. Safely Validate Password & Record Failures
+        $passwordMatches = false;
+
+        if ($user && ! empty($user->password)) {
+            try {
+                $passwordMatches = Hash::check($request->password, $user->password);
+            } catch (\Throwable $e) {
+                $passwordMatches = false;
+            }
+        }
+
+        if (! $user || ! $passwordMatches) {
             RateLimiter::hit($throttleKey, 300);
-        
+
             if ($user) {
                 $user->recordFailedLoginAttempt();
-        
-                // Immediately throw lockout exception if the 5th attempt triggered the lock
+
                 if ($user->isLockedOut()) {
                     $seconds = now()->diffInSeconds($user->locked_until);
                     $minutes = ceil($seconds / 60);
-        
+
                     throw ValidationException::withMessages([
                         'login' => "Your account has been temporarily locked due to repeated failed login attempts. Please try again in {$minutes} minute(s).",
                     ]);
                 }
-        
-                // Check if input matches any previously recorded password in PasswordHistory
-                $usedOldPassword = $user->passwordHistories()
-                    ->get()
-                    ->contains(fn ($history) => Hash::check($request->password, $history->password));
-        
+
+                $usedOldPassword = false;
+                try {
+                    $usedOldPassword = $user->passwordHistories()
+                        ->get()
+                        ->contains(function ($history) use ($request) {
+                            $hash = $history->password ?? $history->password_hash ?? null;
+                            if (! $hash) {
+                                return false;
+                            }
+                            try {
+                                return Hash::check($request->password, $hash);
+                            } catch (\Throwable $e) {
+                                return false;
+                            }
+                        });
+                } catch (\Throwable $e) {
+                    $usedOldPassword = false;
+                }
+
                 if ($usedOldPassword) {
                     throw ValidationException::withMessages([
                         'login' => 'You entered an old password. Please use your current password or request a password reset.',
                     ]);
                 }
             }
-        
+
             throw ValidationException::withMessages([
                 'login' => __('auth.failed'),
             ]);
@@ -160,7 +234,7 @@ class AuthenticatedSessionController extends Controller
                 ]);
         }
 
-        // 8. Recognized Trusted Device -> Grant immediate session access
+        // 8. Recognized Trusted Device -> Grant immediate session access & redirect to target subsystem
         $deviceKey = $request->cookie('lodis_device_key');
         $isTrusted = $deviceKey && UserDevice::where('user_id', $user->id)->where('device_key', $deviceKey)->exists();
 
@@ -175,10 +249,16 @@ class AuthenticatedSessionController extends Controller
                     'ip_address' => $request->ip(),
                 ]);
 
-            return redirect()->intended(route('dashboard'));
+            // Refresh cookie expiration to maintain 1-year window
+            Cookie::queue('lodis_device_key', $deviceKey, 525600, '/');
+
+            $destination = session()->pull('sso_redirect_to', route('dashboard'));
+            session()->forget('sso_redirect_to');
+
+            return redirect()->away($destination);
         }
 
-        // 9. Unrecognized Device -> Stage session & route to device-wait
+        // 9. Unrecognized Device -> Stage session & route to device-wait (reuse existing browser cookie key if present)
         session([
             'pending_auth_user_id' => $user->id,
             'pending_auth_remember' => $request->boolean('remember'),
@@ -188,24 +268,26 @@ class AuthenticatedSessionController extends Controller
         $platform = preg_match('/Windows/i', $agent) ? 'Windows PC' : (preg_match('/Mac/i', $agent) ? 'macOS' : 'Mobile Device');
         $browser = preg_match('/Chrome/i', $agent) ? 'Chrome' : (preg_match('/Firefox/i', $agent) ? 'Firefox' : 'Browser');
         $deviceName = "{$platform} ({$browser})";
-        
+
         $loc = \App\Services\DeviceVerificationService::resolveLocationDetails($request->ip(), $request);
+
+        // Reuse existing browser cookie key if present; otherwise generate a new one
+        $authDeviceKey = $deviceKey ?? Str::random(40);
 
         $authRequest = DeviceAuthorization::create([
             'id'          => (string) Str::uuid(),
             'user_id'     => $user->id,
-            'device_key'  => Str::random(40),
+            'device_key'  => $authDeviceKey,
             'device_name' => $deviceName,
             'ip_address'  => $request->ip(),
-            'location'   => $loc['location'],
-            'latitude'   => $loc['latitude'],
-            'longitude'  => $loc['longitude'],
-            'user_agent' => $agent,
-            'status'     => 'pending',
-            'expires_at' => now()->addMinutes(5),
+            'location'    => $loc['location'],
+            'latitude'    => $loc['latitude'],
+            'longitude'   => $loc['longitude'],
+            'user_agent'  => $agent,
+            'status'      => 'pending',
+            'expires_at'  => now()->addMinutes(5),
         ]);
 
-        // Populate database notifications table for review later
         $user->notify(new DeviceSignInAttemptNotification($authRequest));
 
         $existingDevicesCount = UserDevice::where('user_id', $user->id)->count();

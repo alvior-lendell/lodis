@@ -14,6 +14,8 @@ class PasswordHistory extends Model
     protected $fillable = [
         'user_id',
         'password',
+        'ip_address',
+        'event',
     ];
 
     public function user(): BelongsTo

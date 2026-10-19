@@ -14,11 +14,11 @@
     <link rel="preconnect" href="https://fonts.bunny.net">
     <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap" rel="stylesheet" />
 
-    @vite(['resources/css/app.css', 'resources/js/app.js', 'resources/js/auth.js'])
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="min-h-screen font-sans antialiased bg-slate-50 text-slate-900 selection:bg-brand selection:text-white">
 
-    <div class="min-h-screen flex flex-col lg:flex-row">
+    <div id="app" class="min-h-screen flex flex-col lg:flex-row">
         
         <!-- Verification Code Panel -->
         <div class="order-1 lg:order-2 lg:w-1/2 flex items-center justify-center p-6 sm:p-10 lg:p-16 bg-white relative">
@@ -28,32 +28,6 @@
                 <div class="lg:hidden text-center mb-6">
                     <img src="{{ asset('images/LODISv2.png') }}" alt="LODISv2" class="h-12 w-auto mx-auto mb-3 object-contain">
                     <p class="text-[11px] font-bold text-brand uppercase tracking-widest">Lendell Digital Ecosystem</p>
-                </div>
-
-                <!-- Form Header with Switch Method Link -->
-                <div class="mb-6 text-center lg:text-left">
-                    <div class="flex items-center justify-between mb-1">
-                        <h3 class="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-                            @if ($method === 'sms')
-                                Confirm Mobile Number
-                            @elseif ($method === 'authenticator')
-                                Authenticator Code
-                            @else
-                                Enter Security Code
-                            @endif
-                        </h3>
-                        <a href="{{ route('register.otp.select') }}" class="text-xs font-bold text-brand hover:underline flex items-center gap-1">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 17l-5-5m0 0l5-5m-5 5h12"/></svg>
-                            Change Method
-                        </a>
-                    </div>
-                    <p class="text-xs sm:text-sm text-slate-500">
-                        @if ($method === 'sms')
-                            Enter the mobile phone number registered under your employee profile.
-                        @else
-                            Enter the 6-digit verification code to activate your account.
-                        @endif
-                    </p>
                 </div>
 
                 <!-- Session Messages -->
@@ -76,86 +50,19 @@
                     </div>
                 @endif
 
-                <!-- Authenticator App QR Setup Banner -->
-                @if ($method === 'authenticator')
-                    <div class="mb-6 p-5 rounded-3xl bg-slate-50 border border-slate-200 space-y-4 text-center">
-                        <div class="text-left space-y-1">
-                            <h4 class="text-xs font-bold text-slate-900 uppercase tracking-wider">Authenticator Setup</h4>
-                            <p class="text-xs text-slate-500">Scan this QR code using Google Authenticator, 1Password, or Authy, then enter the code below.</p>
-                        </div>
-
-                        @if ($qrCodeUrl)
-                            <div class="p-3 bg-white rounded-2xl inline-block shadow-sm border border-slate-200/80">
-                                <img src="{{ $qrCodeUrl }}" alt="Authenticator QR Code" class="w-44 h-44 mx-auto object-contain">
-                            </div>
-                        @endif
-
-                        @if ($secretKey)
-                            <div class="bg-white p-3 rounded-2xl border border-slate-200 text-center space-y-1">
-                                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Manual Key Entry</span>
-                                <code class="text-xs font-mono font-bold text-brand select-all tracking-wider block">{{ $secretKey }}</code>
-                            </div>
-                        @endif
-                    </div>
-                @else
-                    <!-- Channel Info Banner -->
-                    <div class="mb-6 p-4 rounded-2xl bg-slate-50 border border-slate-200/80 text-xs text-slate-600 font-medium leading-relaxed">
-                        @if ($method === 'sms')
-                            To verify your identity, enter the mobile number linked to your employee record (e.g. <strong>09XXXXXXXXX</strong>).
-                        @else
-                            Code dispatched via Email to <strong class="text-slate-800">{{ $email }}</strong>.
-                        @endif
-                    </div>
-                @endif
-
-                <!-- Verification Form -->
-                <form id="verify-otp-form" method="POST" action="{{ route('register.otp.verify') }}" autocomplete="off" class="space-y-5 transition-opacity duration-200">
-                    @csrf
-
-                    <div>
-                        <label for="otp" class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                            @if ($method === 'authenticator')
-                                6-Digit Authenticator Code
-                            @elseif ($method === 'sms')
-                                Registered Mobile Number
-                            @else
-                                6-Digit Verification Code
-                            @endif
-                        </label>
-                        <div class="relative rounded-2xl shadow-sm">
-                            <input id="otp" type="{{ $method === 'sms' ? 'tel' : 'text' }}" name="otp" 
-                                maxlength="{{ $method === 'sms' ? '13' : '6' }}" required autofocus autocomplete="off"
-                                class="form-input block w-full text-center text-xl sm:text-2xl font-mono tracking-widest px-4 py-3.5 rounded-2xl border-slate-200 focus:border-brand focus:ring-4 focus:ring-brand/15 outline-none transition font-semibold placeholder:text-slate-300 placeholder:tracking-normal"
-                                placeholder="{{ $method === 'sms' ? '0917XXXXXXX' : '000000' }}">
-                        </div>
-                    </div>
-
-                    <button id="verify-btn" type="submit" 
-                        class="w-full py-3.5 px-4 rounded-2xl bg-brand hover:bg-brand-hover active:bg-brand-hover text-white text-sm font-bold shadow-lg shadow-brand/20 hover:shadow-xl hover:shadow-brand/30 transition duration-200 ease-in-out flex items-center justify-center gap-2 disabled:opacity-85 disabled:cursor-not-allowed">
-                        <svg id="btn-spinner" class="hidden animate-spin h-4 w-4 text-white shrink-0" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <span id="btn-label">Verify & Complete Account</span>
-                    </button>
-                </form>
-
-                <!-- Resend Form with Timer (Email Only) -->
-                @if ($method === 'email')
-                    <div class="mt-8 pt-6 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-medium">
-                        <span>Didn't receive the code?</span>
-                        <form id="resend-otp-form" method="POST" action="{{ route('register.otp.resend') }}" autocomplete="off">
-                            @csrf
-                            <button id="resend-btn" type="submit" disabled data-cooldown="{{ $cooldown }}" class="font-bold text-slate-400 cursor-not-allowed transition disabled:opacity-60 flex items-center gap-1.5">
-                                <svg id="resend-spinner" class="hidden animate-spin h-3.5 w-3.5 text-brand shrink-0" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                <span id="resend-label">Resend Code <span id="timer-label">({{ $cooldown }}s)</span></span>
-                            </button>
-                        </form>
-                    </div>
-                @endif
+                <!-- Vue Verification Form Component -->
+                <verify-otp-form
+                    action-url="{{ route('register.otp.verify') }}"
+                    resend-action-url="{{ route('register.otp.resend') }}"
+                    switch-method-url="{{ route('register.otp.select') }}"
+                    csrf-token="{{ csrf_token() }}"
+                    method="{{ $method }}"
+                    email="{{ $email }}"
+                    phone-number="{{ $phoneNumber ?? '' }}"
+                    qr-code-url="{{ $qrCodeUrl ?? '' }}"
+                    secret-key="{{ $secretKey ?? '' }}"
+                    cooldown-seconds="{{ $cooldownSeconds ?? 60 }}"
+                ></verify-otp-form>
 
             </div>
         </div>
@@ -191,5 +98,6 @@
         </div>
 
     </div>
+
 </body>
 </html>

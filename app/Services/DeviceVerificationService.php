@@ -85,6 +85,14 @@ class DeviceVerificationService
     }
 
     /**
+     * Resolve IP address to a location string.
+     */
+    public static function resolveLocation(?string $ip, ?Request $request = null): string
+    {
+        return static::resolveLocationDetails($ip, $request)['location'];
+    }
+
+    /**
      * Resolve IP address to location string and coordinates array.
      */
     public static function resolveLocationDetails(?string $ip, ?Request $request = null): array

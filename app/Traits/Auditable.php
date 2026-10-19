@@ -40,7 +40,7 @@ trait Auditable
         if ($newValues) $newValues = array_diff_key($newValues, $hidden);
 
         AuditLog::create([
-            'user_id' => Auth::id(),
+            'user_id'        => Auth::user()?->id,
             'event' => $event,
             'auditable_type' => get_class($this),
             'auditable_id' => $this->getKey(),

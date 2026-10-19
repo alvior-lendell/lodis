@@ -21,9 +21,36 @@ class HolidayController extends Controller
 
         $holidays = Holiday::whereYear('date', $selectedYear)
             ->orderBy('date', 'asc')
-            ->get();
+            ->get()
+            ->map(function ($holiday) {
+                $carbonDate = \Carbon\Carbon::parse($holiday->date);
+                $holiday->date_formatted = $carbonDate->format('M d, Y'); // e.g., "Jan 01, 2026"
+                $holiday->day_of_week = $carbonDate->format('l');         // e.g., "Thursday"
+                return $holiday;
+            });
 
-        return view('holidays.index', compact('holidays', 'selectedYear'));
+        $availableYears = Holiday::selectRaw('YEAR(date) as year')
+            ->distinct()
+            ->orderBy('year', 'desc')
+            ->pluck('year')
+            ->toArray();
+
+        if (empty($availableYears)) {
+            $availableYears = range(date('Y') - 1, date('Y') + 2);
+        }
+
+        $routes = [
+            'index' => route('holidays.index'),
+            'sync'  => route('holidays.sync'),
+            'store' => route('holidays.store'),
+        ];
+
+        return view('holidays.index', [
+            'holidays' => $holidays,
+            'selectedYear' => $selectedYear,
+            'availableYears' => $availableYears,
+            'routes' => $routes,
+        ]);
     }
 
     /**

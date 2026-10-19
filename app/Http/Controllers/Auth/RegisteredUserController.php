@@ -134,11 +134,11 @@ class RegisteredUserController extends Controller
 
         session([
             'pending_registration' => [
-                'name' => $fullName,
-                'email' => $request->email,
-                'employee_id' => $employee->employee_id,
+                'name'         => $fullName,
+                'email'        => $request->email,
+                'employee_id'  => $employee->employee_id,
                 'phone_number' => $employee->contact_number ?? null,
-                'password' => Hash::make($request->password),
+                'password'     => $request->password, // Store plain text so Eloquent $casts hashes it ONCE on User::create()
             ],
             'pending_otp_email' => $request->email,
             'active_otp_method' => 'email',
@@ -312,7 +312,7 @@ class RegisteredUserController extends Controller
                 'phone_number' => $payload['phone_number'] ?? null,
                 'password' => $payload['password'],
                 'role' => 'Employee',
-                'is_active' => true,
+                'is_active' => false,
                 'preferred_2fa_method' => $method,
                 'two_factor_secret' => $totpSecret,
                 'email_verified_at' => now(),
@@ -329,22 +329,33 @@ class RegisteredUserController extends Controller
             }
         }
         
-        // Notify admins & the newly registered user
+        // Notify admins & newly registered user
         if ($isNewRegistration) {
             $adminRecipients = User::whereIn('role', ['Superadmin', 'Admin'])
                 ->where('is_active', true)
                 ->get();
 
-            // Notify Superadmins and Admins
+            // 1. Create database notification entries
             Notification::send($adminRecipients, new UserRegisteredNotification($user));
 
-            // Notify the newly registered user
+            // 2. Dispatch real-time Reverb event using each admin's specific DB notification UUID
+            foreach ($adminRecipients as $admin) {
+                $dbNotif = $admin->notifications()
+                    ->where('type', UserRegisteredNotification::class)
+                    ->latest()
+                    ->first();
+
+                \App\Events\UserRegisteredEvent::dispatch(
+                    $user, 
+                    $admin->id, 
+                    $dbNotif?->id
+                );
+            }
+
             $user->notify(new RegistrationSuccessfulNotification());
         }
 
         session()->forget(['pending_otp_email', 'pending_registration', 'active_otp_method', 'pending_totp_secret']);
-
-        Auth::login($user);
 
         // Reuse existing device cookie if present on this workstation, otherwise generate a new UUID
         $deviceKey = $request->cookie('lodis_device_key') ?? (string) Str::uuid();
@@ -396,7 +407,10 @@ class RegisteredUserController extends Controller
         // Set persistent 1-year device cookie (525600 minutes)
         Cookie::queue('lodis_device_key', $deviceKey, 525600);
 
-        return redirect()->route('dashboard');
+        return redirect()->route('login')->with(
+            'status', 
+            'Account registered successfully! Your account is pending administrator activation before you can log in.'
+        );
     }
 
     /**

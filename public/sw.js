@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lodis-v2-cache-v5';
+const CACHE_NAME = 'lodis-v2-cache-v6';
 const STATIC_ASSETS = [
     '/',
     '/manifest.json',
@@ -6,7 +6,6 @@ const STATIC_ASSETS = [
     '/images/LODISv2.png'
 ];
 
-// Immediately activate updated service workers
 self.addEventListener('install', (event) => {
     self.skipWaiting();
 });
@@ -25,17 +24,22 @@ self.addEventListener('fetch', (event) => {
     const request = event.request;
     const url = new URL(request.url);
 
-    // Ignore non-GET, non-HTTP(S), or browser extension requests
+    // 1. Ignore non-GET, non-HTTP(S), or browser extension requests
     if (request.method !== 'GET' || !url.protocol.startsWith('http')) {
         return;
     }
 
-    // Bypass Service Worker entirely for Vite-compiled assets to prevent modulepreload mismatches
+    // 2. Bypass SW for Vite build assets to prevent modulepreload mismatches
     if (url.pathname.startsWith('/build/')) {
         return;
     }
 
-    // Network-First for HTML Page Navigations (Guarantees fresh Blade updates on standard reload)
+    // 3. Bypass third-party analytics and beacon tracking
+    if (url.hostname.includes('cloudflareinsights.com')) {
+        return;
+    }
+
+    // 4. Network-First for HTML Page Navigations
     if (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')) {
         event.respondWith(
             fetch(request)
@@ -51,16 +55,16 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // Stale-While-Revalidate for CSS, JS, and image assets (non-build)
+    // 5. Stale-While-Revalidate for non-build assets
     event.respondWith(
         caches.match(request).then((cachedResponse) => {
             const fetchPromise = fetch(request).then((networkResponse) => {
-                if (networkResponse && networkResponse.status === 200) {
+                if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
                     const copy = networkResponse.clone();
                     caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
                 }
                 return networkResponse;
-            }).catch(() => {/* Handle offline asset fallback */});
+            }).catch(() => {});
 
             return cachedResponse || fetchPromise;
         })

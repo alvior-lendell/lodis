@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Events\UserUpdated;
+use App\Models\Employee;
 use App\Models\System;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -43,7 +45,38 @@ class UserController extends Controller
 
         $users = $query->latest()->paginate(15)->withQueryString();
 
-        return view('users.index', compact('users'));
+        // Format data expected by resources/views/users/index.blade.php & Vue component
+        $usersFormatted = collect($users->items())->map(function ($user) {
+            return [
+                'id'                            => $user->id,
+                'employee_id'                   => $user->employee_id,
+                'name'                          => $user->name,
+                'email'                         => $user->email,
+                'role'                          => $user->role,
+                'is_active'                     => (bool) $user->is_active,
+                'created_at'                    => $user->created_at?->toIso8601String(),
+                'password_changed_at_formatted' => $user->password_changed_at 
+                    ? $user->password_changed_at->format('M d, Y g:i A') 
+                    : 'Never',
+                'edit_url'                      => route('users.edit', $user),
+                'destroy_url'                   => route('users.destroy', $user),
+            ];
+        });
+
+        $filters = [
+            'search' => $request->input('search', ''),
+            'role'   => $request->input('role', ''),
+        ];
+
+        $routes = [
+            'index'        => route('users.index'),
+            'create'       => route('users.create'),
+            'store'        => route('users.store'),
+            'systemAccess' => route('users.system-access'),
+            'otpLogs'      => route('users.otp-logs'),
+        ];
+
+        return view('users.index', compact('users', 'usersFormatted', 'filters', 'routes'));
     }
 
     /**
@@ -51,11 +84,53 @@ class UserController extends Controller
      */
     public function create()
     {
-        $systems = System::where('is_active', true)
-            ->orderBy('default_sort_order', 'asc')
-            ->get();
+        // Get all employee IDs already associated with a user account
+        $existingUserEmployeeIds = User::whereNotNull('employee_id')
+            ->pluck('employee_id')
+            ->filter()
+            ->toArray();
 
-        return view('users.create', compact('systems'));
+        // Fetch active, eligible employees sorted by employee_id
+        $employeesFormatted = Employee::query()
+            ->whereNotIn('employee_id', $existingUserEmployeeIds)
+            ->whereNotIn('employment_status', ['Resigned', 'Terminated', 'Exempt'])
+            ->orderBy('employee_id', 'asc')
+            ->get()
+            ->map(function ($emp) {
+                return [
+                    'id'                => $emp->id,
+                    'employee_id'       => $emp->employee_id,
+                    'full_name'         => trim("{$emp->first_name} {$emp->last_name}"),
+                    'first_name'        => $emp->first_name,
+                    'last_name'         => $emp->last_name,
+                    'email'             => $emp->email,
+                    'employment_status' => $emp->employment_status,
+                    'department'        => $emp->department ?? 'General Operations',
+                    'position'          => $emp->position ?? 'Staff',
+                ];
+            });
+
+        // Format active systems
+        $systemsFormatted = System::where('is_active', true)
+            ->orderBy('default_sort_order', 'asc')
+            ->get()
+            ->map(function ($system) {
+                return [
+                    'id'   => $system->id,
+                    'code' => $system->code ?? $system->name,
+                    'name' => $system->name,
+                ];
+            });
+
+        $routes = [
+            'index'  => route('users.index'),
+            'cancel' => route('users.index'),
+            'store'  => route('users.store'),
+        ];
+
+        $oldValues = session()->getOldInput();
+
+        return view('users.create', compact('employeesFormatted', 'oldValues', 'systemsFormatted', 'routes'));
     }
 
     /**
@@ -80,26 +155,28 @@ class UserController extends Controller
             'systems.*.role'       => ['nullable', Rule::in(['Superadmin', 'Admin', 'Employee', 'None'])],
         ]);
 
-        DB::transaction(function () use ($request, $validated) {
-            $user = User::create([
+        $createdUser = null;
+
+        DB::transaction(function () use ($request, $validated, &$createdUser) {
+            $createdUser = User::create([
                 'employee_id'         => $validated['employee_id'] ?? null,
                 'name'                => $validated['name'],
                 'email'               => $validated['email'],
                 'password'            => Hash::make($validated['password']),
                 'role'                => $validated['role'],
-                'is_active'           => $request->boolean('is_active', true),
+                'is_active'           => $request->has('is_active') ? $request->boolean('is_active') : true,
                 'password_changed_at' => now(),
                 'email_verified_at'   => now(),
             ]);
 
             // Seed initial password into password_histories table
-            $user->recordPasswordHistory();
+            $createdUser->recordPasswordHistory();
 
             // Sync system access grants
             if ($request->has('systems') && is_array($request->input('systems'))) {
                 $syncData = [];
                 foreach ($request->input('systems') as $systemId => $pivot) {
-                    $hasAccess = !empty($pivot['has_access']) && ($pivot['has_access'] == '1' || $pivot['has_access'] === true);
+                    $hasAccess = filter_var($pivot['has_access'] ?? false, FILTER_VALIDATE_BOOLEAN);
                     $role = $pivot['role'] ?? 'None';
 
                     $syncData[$systemId] = [
@@ -107,9 +184,14 @@ class UserController extends Controller
                         'role'       => $role,
                     ];
                 }
-                $user->systems()->sync($syncData);
+                $createdUser->systems()->sync($syncData);
             }
         });
+
+        // Broadcast Reverb Event after DB transaction commits
+        if ($createdUser) {
+            UserUpdated::dispatch($createdUser->id, 'created');
+        }
 
         return redirect()->route('users.index')->with('status', 'User account created successfully with system grants.');
     }
@@ -126,11 +208,42 @@ class UserController extends Controller
 
         $user->load('systems');
 
-        $systems = System::where('is_active', true)
-            ->orderBy('default_sort_order', 'asc')
-            ->get();
+        // Format user data with mapped system access pivot properties
+        $userFormatted = [
+            'id'          => $user->id,
+            'employee_id' => $user->employee_id,
+            'name'        => $user->name,
+            'email'       => $user->email,
+            'role'        => $user->role,
+            'is_active'   => (bool) $user->is_active,
+            'systems'     => $user->systems->mapWithKeys(function ($system) {
+                return [
+                    $system->id => [
+                        'has_access' => (bool) ($system->pivot->has_access ?? false),
+                        'role'       => $system->pivot->role ?? 'None',
+                    ],
+                ];
+            }),
+        ];
 
-        return view('users.edit', compact('user', 'systems'));
+        // Format active systems collection
+        $systemsFormatted = System::where('is_active', true)
+            ->orderBy('default_sort_order', 'asc')
+            ->get()
+            ->map(function ($system) {
+                return [
+                    'id'   => $system->id,
+                    'code' => $system->code ?? $system->name,
+                    'name' => $system->name,
+                ];
+            });
+
+        $routes = [
+            'index'  => route('users.index'),
+            'update' => route('users.update', $user),
+        ];
+
+        return view('users.edit', compact('userFormatted', 'systemsFormatted', 'routes'));
     }
 
     /**
@@ -192,7 +305,7 @@ class UserController extends Controller
             if ($request->has('systems') && is_array($request->input('systems'))) {
                 $syncData = [];
                 foreach ($request->input('systems') as $systemId => $pivot) {
-                    $hasAccess = !empty($pivot['has_access']) && ($pivot['has_access'] == '1' || $pivot['has_access'] === true);
+                    $hasAccess = filter_var($pivot['has_access'] ?? false, FILTER_VALIDATE_BOOLEAN);
                     $role = $pivot['role'] ?? 'None';
 
                     $syncData[$systemId] = [
@@ -205,6 +318,9 @@ class UserController extends Controller
                 $user->systems()->detach();
             }
         });
+
+        // Broadcast Reverb Event after DB transaction commits
+        UserUpdated::dispatch($user->id, 'updated');
 
         return redirect()->route('users.index')->with('status', 'User account and system grants updated.');
     }
@@ -222,11 +338,94 @@ class UserController extends Controller
             return redirect()->route('users.index')->with('status', 'You cannot delete your own active account.');
         }
 
+        $userId = $user->id;
+
         DB::transaction(function () use ($user) {
             $user->systems()->detach();
             $user->delete();
         });
 
+        // Broadcast Reverb Event after DB transaction commits
+        UserUpdated::dispatch($userId, 'deleted');
+
         return redirect()->route('users.index')->with('status', 'User account removed.');
+    }
+
+    /**
+     * Display the User System Access privileges page.
+     */
+    public function systemAccess()
+    {
+        $users = User::with('systems')->orderBy('name', 'asc')->get()->map(function ($user) {
+            return [
+                'id'          => $user->id,
+                'name'        => $user->name,
+                'email'       => $user->email,
+                'employee_id' => $user->employee_id,
+                'role'        => $user->role,
+                'systems'     => $user->systems->keyBy('id')->map(function ($sys) {
+                    return [
+                        'has_access' => (bool) $sys->pivot->has_access,
+                        'role'       => $sys->pivot->role,
+                    ];
+                }),
+                'update_access_url' => route('users.system-access.update', $user),
+            ];
+        });
+
+        // Query available fields without explicitly selecting missing 'code' column
+        $systems = System::where('is_active', true)
+            ->orderBy('default_sort_order', 'asc')
+            ->get()
+            ->map(function ($system) {
+                return [
+                    'id'       => $system->id,
+                    'name'     => $system->name,
+                    'code'     => $system->slug ?? $system->tag ?? $system->name,
+                    'logo_url' => $system->logo_url,
+                ];
+            });
+
+        $routes = [
+            'index' => route('users.index'),
+        ];
+
+        return view('users.system-access', compact('users', 'systems', 'routes'));
+    }
+
+    /**
+     * Update system access grants and subsystem roles for a specific user.
+     */
+    public function updateSystemAccess(Request $request, User $user)
+    {
+        $validated = $request->validate([
+            'systems'              => 'required|array',
+            'systems.*.has_access' => 'nullable|boolean',
+            'systems.*.role'       => 'required|string|in:Superadmin,Admin,Employee,None',
+        ]);
+
+        $activeSystems = System::pluck('id')->toArray();
+        $syncData = [];
+
+        foreach ($activeSystems as $systemId) {
+            $hasAccess = isset($validated['systems'][$systemId]['has_access']) 
+                ? (bool) $validated['systems'][$systemId]['has_access'] 
+                : false;
+
+            $role = $validated['systems'][$systemId]['role'] ?? 'None';
+
+            $syncData[$systemId] = [
+                'has_access' => $hasAccess ? 1 : 0,
+                'role'       => $role,
+            ];
+        }
+
+        // Sync entries into system_user table
+        $user->systems()->sync($syncData);
+
+        // Broadcast Reverb Event
+        UserUpdated::dispatch($user->id, 'access_updated');
+
+        return redirect()->back()->with('status', "System access permissions updated successfully for {$user->name}.");
     }
 }

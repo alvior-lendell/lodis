@@ -10,7 +10,6 @@ use App\Http\Controllers\Auth\NewPasswordController;
 use App\Http\Controllers\Auth\PasswordController;
 use App\Http\Controllers\Auth\PasswordResetLinkController;
 use App\Http\Controllers\Auth\RegisteredUserController;
-use App\Http\Controllers\Auth\SmsVerificationController;
 use App\Http\Controllers\Auth\TwoFactorAuthenticationController;
 use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\ProfileController;
@@ -61,18 +60,6 @@ Route::middleware('guest')->group(function () {
 
     Route::post('register/verify-otp/switch-method', [RegisteredUserController::class, 'switchMethod'])
         ->name('register.otp.switch-method');
-
-    // SMS Phone Number Verification
-    Route::get('verify-sms', [SmsVerificationController::class, 'create'])
-        ->name('verification.sms');
-
-    Route::post('verify-sms', [SmsVerificationController::class, 'store'])
-        ->middleware('throttle:6,1')
-        ->name('verification.sms.verify');
-
-    Route::post('verify-sms/resend', [SmsVerificationController::class, 'resend'])
-        ->middleware('throttle:3,1')
-        ->name('verification.sms.resend');
 
     // TOTP / Authenticator App Verification
     Route::get('verify-authenticator', [TwoFactorAuthenticationController::class, 'create'])
