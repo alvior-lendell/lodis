@@ -25,6 +25,18 @@ Route::middleware('guest')->group(function () {
     Route::get('/', [AuthenticatedSessionController::class, 'create'])->name('login');
     Route::post('/', [AuthenticatedSessionController::class, 'store'])->middleware('throttle:5,1');
 
+    // Facebook-style Saved Account & 1-Click Login endpoints
+    Route::get('/auth/device-identity', [AuthenticatedSessionController::class, 'deviceIdentity'])
+        ->middleware('throttle:15,1')
+        ->name('auth.device-identity');
+
+    Route::post('/auth/one-click-login', [AuthenticatedSessionController::class, 'oneClickLogin'])
+        ->middleware('throttle:5,1')
+        ->name('auth.one-click-login');
+
+    Route::post('/auth/forget-device', [AuthenticatedSessionController::class, 'forgetDevice'])
+        ->name('auth.forget-device');
+
     Route::get('login', function () {
         return redirect()->route('login');
     });
@@ -119,6 +131,7 @@ Route::middleware('guest')->group(function () {
         ->name('password.reset');
 
     Route::post('reset-password', [NewPasswordController::class, 'store'])
+        ->middleware('throttle:5,1') // Bug #5 fix: prevent token brute-force
         ->name('password.store');
 });
 

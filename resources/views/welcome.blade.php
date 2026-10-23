@@ -34,7 +34,7 @@
     <div id="app" class="min-h-screen flex flex-col lg:flex-row">
 
         <!-- Login Panel (Left Side) -->
-        <div class="order-1 lg:order-2 lg:w-1/2 lg:min-h-screen flex items-center justify-center p-6 sm:p-10 lg:p-16 bg-white relative z-10">
+        <div class="order-1 lg:order-2 lg:w-1/2 lg:h-screen lg:sticky lg:top-0 lg:self-start lg:overflow-y-auto flex items-center justify-center p-6 sm:p-10 lg:p-16 bg-white relative z-10">
             <div id="auth-container" class="w-full max-w-md transition-all duration-200 my-auto">
 
                 <!-- Device Rejection Alert -->
@@ -76,6 +76,9 @@
                 <!-- Vue Login Form Component -->
                 <login-form 
                     action-url="{{ route('login') }}" 
+                    one-click-url="{{ route('auth.one-click-login') }}"
+                    forget-device-url="{{ route('auth.forget-device') }}"
+                    :saved-accounts='@json($savedAccounts)'
                     csrf-token="{{ csrf_token() }}"
                     old-login="{{ old('login') }}"
                     :old-remember="{{ old('remember') ? 'true' : 'false' }}"

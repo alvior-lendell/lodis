@@ -138,7 +138,8 @@ class RegisteredUserController extends Controller
                 'email'        => $request->email,
                 'employee_id'  => $employee->employee_id,
                 'phone_number' => $employee->contact_number ?? null,
-                'password'     => $request->password, // Store plain text so Eloquent $casts hashes it ONCE on User::create()
+                // Bug #4 fix: store the bcrypt hash, never the plain-text password
+                'password'     => Hash::make($request->password),
             ],
             'pending_otp_email' => $request->email,
             'active_otp_method' => 'email',
@@ -305,18 +306,20 @@ class RegisteredUserController extends Controller
         $isNewRegistration = false;
 
         if (! $user) {
-            $user = User::create([
-                'name' => $payload['name'],
-                'email' => $payload['email'],
-                'employee_id' => $payload['employee_id'],
-                'phone_number' => $payload['phone_number'] ?? null,
-                'password' => $payload['password'],
-                'role' => 'Employee',
-                'is_active' => false,
+            // Bug #4 fix: password is already hashed — use forceFill to bypass the 'hashed' cast
+            $user = new User();
+            $user->forceFill([
+                'name'                 => $payload['name'],
+                'email'                => $payload['email'],
+                'employee_id'          => $payload['employee_id'],
+                'phone_number'         => $payload['phone_number'] ?? null,
+                'password'             => $payload['password'], // already bcrypt hash
+                'role'                 => 'Employee',
+                'is_active'            => false,
                 'preferred_2fa_method' => $method,
-                'two_factor_secret' => $totpSecret,
-                'email_verified_at' => now(),
-            ]);
+                'two_factor_secret'    => $totpSecret,
+                'email_verified_at'    => now(),
+            ])->save();
             $isNewRegistration = true;
         } else {
             if (is_null($user->email_verified_at)) {

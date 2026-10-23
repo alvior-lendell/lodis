@@ -12,6 +12,7 @@ use App\Models\User;
 use App\Models\UserDevice;
 use App\Notifications\DeviceSignInAttemptNotification;
 use App\Rules\Turnstile;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -67,9 +68,27 @@ class AuthenticatedSessionController extends Controller
             ->get()
             ->map(fn (System $sys) => $sys->toSlideshowArray());
 
+        // 6. Resolve Facebook-style saved accounts linked to this workstation cookie
+        $savedAccounts = [];
+        $deviceKey = $request->cookie('lodis_device_key');
+        if ($deviceKey) {
+            $devices = UserDevice::where('device_key', $deviceKey)
+                ->where('is_trusted', true)
+                ->with(['user.employee'])
+                ->get();
+
+            foreach ($devices as $dev) {
+                $payload = $this->resolveSavedAccountPayload($dev);
+                if ($payload) {
+                    $savedAccounts[] = $payload;
+                }
+            }
+        }
+
         return view('welcome', compact(
             'system',
             'systems',
+            'savedAccounts',
             'isSubsystem',
             'systemName',
             'systemLogo',
@@ -86,7 +105,11 @@ class AuthenticatedSessionController extends Controller
             'password' => ['required', 'string'],
         ];
 
-        if (config('services.turnstile.key')) {
+        $deviceKey = $request->cookie('lodis_device_key');
+        $isTrusted = $deviceKey && UserDevice::where('device_key', $deviceKey)->where('is_trusted', true)->exists();
+
+        // Turnstile is ONLY required for unrecognized devices / public login attempts
+        if (config('services.turnstile.key') && ! $isTrusted) {
             $rules['cf-turnstile-response'] = ['required', new Turnstile()];
         }
 
@@ -206,10 +229,10 @@ class AuthenticatedSessionController extends Controller
                     'employee_id' => $user->employee_id,
                     'otp' => Hash::make($otp),
                     'payload' => [
-                        'name' => $user->name,
-                        'email' => $user->email,
+                        // Bug #6 fix: never store the password hash in OTP payload
+                        'name'        => $user->name,
+                        'email'       => $user->email,
                         'employee_id' => $user->employee_id,
-                        'password' => $user->password,
                     ],
                     'resend_attempts' => 0,
                     'is_used' => false,
@@ -242,12 +265,18 @@ class AuthenticatedSessionController extends Controller
             Auth::login($user, $request->boolean('remember'));
             $request->session()->regenerate();
 
+            $updateData = [
+                'last_active_at' => now(),
+                'ip_address'     => $request->ip(),
+            ];
+
+            if ($request->has('enable_one_click')) {
+                $updateData['one_click_enabled'] = $request->boolean('enable_one_click');
+            }
+
             UserDevice::where('user_id', $user->id)
                 ->where('device_key', $deviceKey)
-                ->update([
-                    'last_active_at' => now(),
-                    'ip_address' => $request->ip(),
-                ]);
+                ->update($updateData);
 
             // Refresh cookie expiration to maintain 1-year window
             Cookie::queue('lodis_device_key', $deviceKey, 525600, '/');
@@ -297,6 +326,199 @@ class AuthenticatedSessionController extends Controller
         }
 
         return redirect()->route('device.wait', $authRequest->id);
+    }
+
+    /**
+     * Resolve saved account identities linked to the current workstation cookie.
+     */
+    public function deviceIdentity(Request $request): JsonResponse
+    {
+        $deviceKey = $request->cookie('lodis_device_key');
+
+        if (! $deviceKey) {
+            return response()->json(['saved_accounts' => []]);
+        }
+
+        $devices = UserDevice::where('device_key', $deviceKey)
+            ->where('is_trusted', true)
+            ->with(['user.employee'])
+            ->get();
+
+        $savedAccounts = [];
+        foreach ($devices as $dev) {
+            $payload = $this->resolveSavedAccountPayload($dev);
+            if ($payload) {
+                $savedAccounts[] = $payload;
+            }
+        }
+
+        return response()->json(['saved_accounts' => $savedAccounts]);
+    }
+
+    /**
+     * Build display payload for saved workstation account with profile photo and redacted name/email.
+     */
+    private function resolveSavedAccountPayload(UserDevice $device): ?array
+    {
+        $user = $device->user;
+        if (! $user || ! $user->is_active) {
+            return null;
+        }
+
+        $employee = $user->employee;
+
+        // Use Employee profile photo first, fallback to user photo if exists
+        $photoPath = $employee?->profile_photo_path ?? ($user->profile_photo_path ?? null);
+        $avatarUrl = $photoPath ? asset('storage/' . ltrim($photoPath, '/')) : null;
+
+        $fullName = trim($employee?->full_name ?? $user->name);
+        $firstName = trim($employee?->first_name ?? explode(' ', $fullName)[0]);
+
+        // Redact Email or Employee ID: e.g. "aljhon@lendell.com" -> "a•••••n@l••••.com"
+        $rawLogin = $user->email ?? $user->employee_id ?? '';
+        $redactedLogin = $rawLogin;
+
+        if (filter_var($rawLogin, FILTER_VALIDATE_EMAIL)) {
+            [$local, $domain] = explode('@', $rawLogin, 2);
+            $localLen = strlen($local);
+            $maskedLocal = $localLen > 2
+                ? substr($local, 0, 1) . str_repeat('•', max(3, min(5, $localLen - 2))) . substr($local, -1)
+                : substr($local, 0, 1) . '•••';
+
+            $dotPos = strrpos($domain, '.');
+            if ($dotPos !== false) {
+                $domainName = substr($domain, 0, $dotPos);
+                $tld = substr($domain, $dotPos);
+                $domainLen = strlen($domainName);
+                $maskedDomain = $domainLen > 2
+                    ? substr($domainName, 0, 1) . str_repeat('•', max(2, min(4, $domainLen - 1))) . $tld
+                    : substr($domainName, 0, 1) . '••' . $tld;
+            } else {
+                $maskedDomain = substr($domain, 0, 1) . '•••';
+            }
+
+            $redactedLogin = "{$maskedLocal}@{$maskedDomain}";
+        } elseif (strlen($rawLogin) > 3) {
+            $redactedLogin = substr($rawLogin, 0, 1) . str_repeat('•', strlen($rawLogin) - 2) . substr($rawLogin, -1);
+        }
+
+        return [
+            'id'                => $device->id,
+            'user_id'           => $user->id,
+            'name'              => $firstName,
+            'first_name'        => $firstName,
+            'login'             => $rawLogin,
+            'redacted_login'    => $redactedLogin,
+            'avatar_url'        => $avatarUrl,
+            'initials'          => mb_strtoupper(mb_substr($firstName, 0, 1)),
+            'one_click_enabled' => (bool) ($device->one_click_enabled ?? false),
+        ];
+    }
+
+    /**
+     * True 1-Click Login using verified trusted workstation cookie and one_click_enabled flag.
+     */
+    public function oneClickLogin(Request $request): RedirectResponse|JsonResponse
+    {
+        $deviceKey = $request->cookie('lodis_device_key');
+
+        if (! $deviceKey) {
+            throw ValidationException::withMessages([
+                'login' => 'Workstation authorization not found. Please log in with your credentials.',
+            ]);
+        }
+
+        $query = UserDevice::where('device_key', $deviceKey)
+            ->where('is_trusted', true)
+            ->where('one_click_enabled', true);
+
+        if ($request->filled('user_id')) {
+            $query->where('user_id', $request->input('user_id'));
+        } elseif ($request->filled('login')) {
+            $targetUser = User::where('email', $request->login)->orWhere('employee_id', $request->login)->first();
+            if ($targetUser) {
+                $query->where('user_id', $targetUser->id);
+            }
+        }
+
+        $device = $query->first();
+
+        if (! $device) {
+            throw ValidationException::withMessages([
+                'login' => '1-Click login is not enabled for this account on this device. Please enter your password.',
+            ]);
+        }
+
+        $user = $device->user;
+
+        if (! $user || ! $user->is_active) {
+            throw ValidationException::withMessages([
+                'login' => 'Your account is inactive or not found. Please contact an administrator.',
+            ]);
+        }
+
+        if ($user->isLockedOut()) {
+            $seconds = now()->diffInSeconds($user->locked_until);
+            $minutes = ceil($seconds / 60);
+
+            throw ValidationException::withMessages([
+                'login' => "Your account is temporarily locked due to repeated failed attempts. Please try again in {$minutes} minute(s).",
+            ]);
+        }
+
+        Auth::login($user, true);
+        $request->session()->regenerate();
+
+        $device->update([
+            'last_active_at' => now(),
+            'ip_address'     => $request->ip(),
+        ]);
+
+        Cookie::queue('lodis_device_key', $deviceKey, 525600, '/');
+
+        $destination = session()->pull('sso_redirect_to', route('dashboard'));
+        session()->forget('sso_redirect_to');
+
+        if ($request->wantsJson()) {
+            return response()->json(['redirect' => $destination]);
+        }
+
+        return redirect()->away($destination);
+    }
+
+    /**
+     * Remove a saved account or entire workstation cookie from this browser.
+     */
+    public function forgetDevice(Request $request): RedirectResponse|JsonResponse
+    {
+        $deviceKey = $request->cookie('lodis_device_key');
+        $userId = $request->input('user_id');
+
+        if ($deviceKey) {
+            if ($userId) {
+                // Delete device link for only this user
+                UserDevice::where('device_key', $deviceKey)->where('user_id', $userId)->delete();
+
+                // If no more devices remain for this cookie, expire the cookie
+                $remaining = UserDevice::where('device_key', $deviceKey)->count();
+                if ($remaining === 0) {
+                    Cookie::expire('lodis_device_key');
+                }
+            } else {
+                UserDevice::where('device_key', $deviceKey)->update([
+                    'one_click_enabled' => false,
+                ]);
+                Cookie::expire('lodis_device_key');
+            }
+        } else {
+            Cookie::expire('lodis_device_key');
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json(['success' => true]);
+        }
+
+        return redirect()->route('login')->with('status', 'Account removed from this device.');
     }
 
     public function destroy(Request $request): RedirectResponse

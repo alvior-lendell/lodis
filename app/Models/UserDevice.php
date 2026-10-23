@@ -22,12 +22,14 @@ class UserDevice extends Model
         'latitude',   // <-- ADD THIS
         'longitude',
         'is_trusted',
+        'one_click_enabled',
         'user_agent',
         'last_active_at',
     ];
 
     protected $casts = [
         'is_trusted' => 'boolean',
+        'one_click_enabled' => 'boolean',
         'last_active_at' => 'datetime',
     ];
 

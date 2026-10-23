@@ -372,7 +372,17 @@ class DeviceVerificationController extends Controller
 
     public function finalize(Request $request, string $id): RedirectResponse
     {
-        $auth = DeviceAuthorization::where('id', $id)->where('status', 'approved')->firstOrFail();
+        // Bug #2 fix: verify the requesting browser originated this flow
+        $pendingUserId = session('pending_auth_user_id');
+        $auth = DeviceAuthorization::where('id', $id)
+            ->where('status', 'approved')
+            ->where('expires_at', '>', now()) // Bug #3 fix: enforce expiry
+            ->firstOrFail();
+
+        if (! $pendingUserId || (int) $pendingUserId !== (int) $auth->user_id) {
+            abort(403, 'This device authorization does not belong to your session.');
+        }
+
         $user = User::findOrFail($auth->user_id);
 
         $agent = $auth->user_agent ?? '';
@@ -449,21 +459,21 @@ class DeviceVerificationController extends Controller
             return;
         }
 
-        $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
         $attempts = $activeOtp ? $activeOtp->resend_attempts + ($isResend ? 1 : 0) : 0;
 
         OtpVerification::where('email', $user->email)->where('is_used', false)->update(['is_used' => true]);
 
-        $otpCode = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        
+        // Bug #1 fix: generate ONE OTP, hash it for storage, send the plain value via email
+        $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
         OtpVerification::create([
-            'email' => $user->email,
-            'employee_id' => $user->employee_id,
-            'otp' => $otpCode,
-            'payload' => ['name' => $user->name, 'email' => $user->email],
+            'email'           => $user->email,
+            'employee_id'     => $user->employee_id,
+            'otp'             => Hash::make($otp),
+            'payload'         => ['name' => $user->name, 'email' => $user->email],
             'resend_attempts' => $attempts,
-            'is_used' => false,
-            'expires_at' => now()->addMinutes(10),
+            'is_used'         => false,
+            'expires_at'      => now()->addMinutes(10),
         ]);
 
         Mail::to($user->email)->send(

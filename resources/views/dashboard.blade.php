@@ -22,19 +22,27 @@
 </head>
 <body class="min-h-screen font-sans antialiased bg-slate-50 text-slate-900 flex flex-col">
 
-    <div id="app" class="flex-1 flex flex-col">
+    @php
+        $spaPageData = [
+            'greetingName' => $greetingName,
+            'userRole' => $userRole,
+            'statusMessage' => session('status') ?? '',
+            'createSystemUrl' => Route::has('systems.create') ? route('systems.create') : '#',
+            'scheduleInfo' => $scheduleData,
+            'systems' => $formattedSystems,
+            'weatherLocation' => $weatherLocation,
+        ];
+    @endphp
+
+    <script id="spa-page-data" type="application/json">
+        @json($spaPageData)
+    </script>
+
+    <div id="app" data-router-app class="flex-1 flex flex-col">
         @include('partials.header')
 
         <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <dashboard-view
-                greeting-name="{{ $greetingName }}"
-                user-role="{{ $userRole }}"
-                status-message="{{ session('status') ?? '' }}"
-                create-system-url="{{ Route::has('systems.create') ? route('systems.create') : '#' }}"
-                :schedule-info="{{ json_encode($scheduleData) }}"
-                :systems="{{ json_encode($formattedSystems) }}"
-                :weather-location="{{ json_encode($weatherLocation) }}"
-            ></dashboard-view>
+            <router-page-outlet></router-page-outlet>
         </main>
     </div>
 
